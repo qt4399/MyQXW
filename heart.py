@@ -2,19 +2,18 @@
 #--------------------------------------------------------------------------------
 
 import readline
-from init import build_agent, run_stream,_iter_text_fragments
+from init import build_heart, run_heart, _iter_text_fragments
 #--------------------------------------------------------------------------------
 
 #---------------------------------------------------------------------------------
-
 def main() -> None:
-    agent = build_agent()
+    agent = build_heart()
     while True:
-        question=input("用户：")
+        question="Boom"
         user_prompt = (
             f"{question}"
         )
-        run_stream(agent, user_prompt)
-
+        run_heart(agent, user_prompt)
+        
 if __name__ == "__main__":
     main()

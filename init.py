@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from skills import read_memory, run_command, update_memory, read_heartbeat      
+from skills import read_memory, run_command, update_memory, read_heartbeat, update_day, read_day
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 system_message = {"role": "system", "content": ""}
+system_heart_message = {"role": "system", "content": ""}
 history_messages = []
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -23,16 +24,28 @@ memory_sections = [
     ("[你的身份]", MEMORY_DIR / "ROLE.md"),
     ("[你的关系网络]", MEMORY_DIR / "RELATION.md"),
     ("[你的灵魂]", MEMORY_DIR / "SOUL.md"),
+    ("[你的每日记录]", MEMORY_DIR / "DAY.md"),
     ("[你的长期记忆]", MEMORY_PATH),
     ("[你的经验和教训]", MEMORY_DIR / "LEARN.md"),
+]
+heartbeat_section = [
+    ("[系统信息]", MEMORY_DIR / "AGENT.md"),
+    ("[你的身份]", MEMORY_DIR / "ROLE.md"),
+    ("[你的关系网络]", MEMORY_DIR / "RELATION.md"),
+    ("[你的灵魂]", MEMORY_DIR / "SOUL.md"),
+    ("[你的每日记录]", MEMORY_DIR / "DAY.md"),
+    ("[你的长期记忆]", MEMORY_PATH),
+    ("[你的经验和教训]", MEMORY_DIR / "LEARN.md"),
+    ("[心跳提示]", MEMORY_DIR / "HEARTBEATS.md"),
 ]
 
 for title, path in memory_sections:
     with path.open("r", encoding="utf-8") as f:
         system_message["content"] += f"[{title}]:\n{f.read()}\n"
-
+for title, path in heartbeat_section:
+    with path.open("r", encoding="utf-8") as f:
+        system_heart_message["content"] += f"[{title}]:\n{f.read()}\n"
 system_message["content"] += "[当前发言人]:秦滔\n"
-
 
 def build_agent():
     llm = ChatOpenAI(
@@ -41,8 +54,15 @@ def build_agent():
         base_url=config["base_url"],
         temperature=0,
     )
-    return create_react_agent(llm, tools=[run_command, read_memory, update_memory, read_heartbeat])
-
+    return create_react_agent(llm, tools=[run_command, read_memory, update_memory, read_heartbeat, update_day, read_day])
+def build_heart():
+    llm = ChatOpenAI(
+        model=config["model"],
+        api_key=config["api_key"],
+        base_url=config["base_url"],
+        temperature=0,
+    )
+    return create_react_agent(llm, tools=[run_command, read_memory, update_memory, read_heartbeat, update_day, read_day])
 
 
 def build_input(user_prompt: str) -> dict:
@@ -50,7 +70,10 @@ def build_input(user_prompt: str) -> dict:
     messages = [system_message] + history_messages + [{"role": "user", "content": user_prompt}]
     return {"messages": messages}
 
-
+def build_heart_input(user_prompt: str) -> dict:
+    global history_messages, system_heart_message
+    messages = [system_heart_message]+[{"role": "user", "content": "Boom"}]
+    return {"messages": messages}
 
 def _iter_text_fragments(content):
     if isinstance(content, str):
@@ -86,7 +109,7 @@ def run_once(agent, user_prompt: str) -> None:
 
 
 def run_stream(agent, user_prompt: str) -> None:
-    global history_messages, system_message
+    global history_messages
     full_response = ""
     print("秦熹微：", end="", flush=True)
     for chunk, metadata in agent.stream(build_input(user_prompt), stream_mode="messages"):
@@ -101,4 +124,12 @@ def run_stream(agent, user_prompt: str) -> None:
             {"role": "assistant", "content": full_response},
         ]
     )
+    print("\n")
+def run_heart(agent, user_prompt: str) -> None:
+    print("秦熹微：", end="", flush=True)
+    for chunk, metadata in agent.stream(build_heart_input(user_prompt), stream_mode="messages"):
+        if metadata.get("langgraph_node") != "agent":
+            continue
+        for text in _iter_text_fragments(getattr(chunk, "content", "")):
+            print(text, end="", flush=True)
     print("\n")

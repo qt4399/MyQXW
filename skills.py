@@ -87,6 +87,46 @@ def read_memory() -> str:
         stderr="",
         path=str(memory_path),
     )
+@tool("update_day")
+def update_day(content: str, mode: str = "append") -> str:
+    """更新 DAY.md。mode 仅支持 append 或 replace。append 为追加，replace 为整篇覆盖。"""
+    print("正在更新每日记录")
+    day_path = MEMORY_DIR / "DAY.md"
+    _ensure_memory_file()
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in {"append", "replace"}:
+        return _json_result(
+            returncode=1,
+            stderr="mode 仅支持 append 或 replace",
+            stdout="",
+            path=str(day_path),
+        )
+@tool("read_day")
+def read_day() -> str:
+    """读取 DAY.md，并返回包含内容的 JSON 字符串。"""
+    print("正在阅读每日记录")
+    day_path = MEMORY_DIR / "DAY.md"
+    return _json_result(
+        returncode=0,
+        stdout=day_path.read_text(encoding="utf-8").strip(),
+        stderr="",
+        path=str(day_path),
+    )
+
+@tool("update_heartbeat")
+def update_heartbeat(content: str, mode: str = "append") -> str:
+    """更新 HEARTBEATS.md。mode 仅支持 append 或 replace。append 为追加，replace 为整篇覆盖。"""
+    print("正在更新心跳提示")
+    heartbeat_path = MEMORY_DIR / "HEARTBEATS.md"
+    _ensure_memory_file()
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in {"append", "replace"}:
+        return _json_result(
+            returncode=1,
+            stderr="mode 仅支持 append 或 replace",
+            stdout="",
+            path=str(heartbeat_path),
+        )
 
 @tool("read_heartbeat")
 def read_heartbeat() -> str:
@@ -99,3 +139,4 @@ def read_heartbeat() -> str:
         stderr="",
         path=str(heartbeat_path),
     )
+

@@ -1,1 +1,2 @@
-# MEMORY.md - 我的记忆
+# MEMORY.md - 我的长期记忆
+
