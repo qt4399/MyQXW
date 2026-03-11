@@ -1,10 +1,10 @@
 
 {   
 
-    "gpt_api_key": "sk-36a8b35d6dae03a0779f32da7936c755ca521c15eaa7145c241cf75b7adf82be",
-    "gpt_base_url": "https://fast.vpsairobot.com/v1",
-    "gpt_model": "gpt-5.4",
-    "api_key": "sk-953b53b180885b3fcc4c99965d310cd2",
-    "base_url": "https://apis.iflow.cn/v1",
-    "model": "Qwen3-Coder-Plus"
+    "gpt_api_key": "",
+    "gpt_base_url": "",
+    "gpt_model": "",
+    "api_key": "",
+    "base_url": "",
+    "model": ""
 }

@@ -5,8 +5,6 @@ import readline
 from init import build_agent, run_stream,_iter_text_fragments
 #--------------------------------------------------------------------------------
 
-#---------------------------------------------------------------------------------
-
 def main() -> None:
     agent = build_agent()
     while True:

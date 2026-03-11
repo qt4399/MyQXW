@@ -1,0 +1,13 @@
+version: 1
+current_day: '2026-03-11'
+current_mode: heartbeat
+last_user_message_at: '2026-03-11T15:59:14+08:00'
+last_assistant_message_at: '2026-03-11T15:59:35+08:00'
+last_heartbeat_at: '2026-03-11T16:31:35+08:00'
+last_day_rollup_at: null
+last_temp_digest_at: null
+play:
+  enabled: true
+  active: false
+  last_triggered_at: '2026-03-11T16:27:41+08:00'
+  mean_interval_seconds: 3600
