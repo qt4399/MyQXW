@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+
+.env
+.env.*
+
+config.json
+logs/
+
+memory/yaml/
+memory/md/day.md
+memory/md/month.md

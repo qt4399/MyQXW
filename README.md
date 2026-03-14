@@ -7,7 +7,7 @@
 
 它的目标不是让 Agent 每次都从零开始，而是让它在长期运行中逐步形成稳定的记忆分层与行为边界：
 
-- 普通对话时，结合最近 20 轮对话、`day.md` 和最近 30 天概括理解上下文。
+- 普通对话时，短期记忆仍保存最近 20 轮，但默认只向模型注入最近 6 轮对话，再结合 `day.md` 和最近 30 天概括理解上下文。
 - 空闲心跳时，主动整理溢出的旧对话，把值得保留的信息沉淀到 `day.md`。
 - 每天凌晨 4:00 后，自动把昨天的 `day.md` 归档进 `month.md`，形成最近 30 天可检索的记录。
 - 当需要查看某一天的细节时，通过工具按日期读取，而不是把整个月详细内容都塞进 prompt。
@@ -21,7 +21,7 @@
 推荐先进入项目目录：
 
 ```bash
-cd my_agent
+cd MyQXW
 ```
 
 然后安装依赖：
@@ -35,78 +35,45 @@ pip install -r requirements.txt
 - `config.json`
 - 需要确认其中的模型名称、`base_url` 和 `api_key` 可正常使用
 
-### 2. 启动普通对话
+### 2. 启动统一调度器
 
 直接运行：
 
 ```bash
-cd my_agent
+cd MyQXW
 python main.py
 ```
 
-启动后会进入命令行聊天模式，你可以直接输入内容，Agent 会结合最近 20 轮对话、`day.md` 和最近 30 天概括进行回复。
+启动后会发生两件事：
 
-### 3. 启动心跳
+- 终端前台进入聊天模式，实时打印主对话输出。
+- `heartbeat` 在后台静默运行，不再往终端刷屏。
 
-直接前台运行：
+### 3. 查看 heartbeat 日志
+
+后台 heartbeat 会把每次运行的时间、状态、触发原因、最终回复和错误信息写到：
+
+- `logs/heartbeat_log.yaml`
+
+这个日志文件最多保留最近 100 条心跳记录。
+
+如果你想在另一个终端实时观察，可以直接查看这个文件：
 
 ```bash
-cd my_agent
+cd MyQXW
+cat logs/heartbeat_log.yaml
+```
+
+### 4. 单独调试 heartbeat
+
+如果你想暂时脱离调度器，单独前台观察 heartbeat，也可以运行：
+
+```bash
+cd MyQXW
 python -u heart.py
 ```
 
-其中 `-u` 表示使用非缓冲输出，这样你可以实时看到心跳过程里的模型动作和输出。
-
-### 4. 后台运行 heart.py，同时查看 AI 动作
-
-当前 `heart.py` 会每秒触发一次心跳，见 `heart.py`；而真正的模型输出是在 `run_heart()` 里逐段打印到标准输出的，见 `init.py`。也就是说：**只要把标准输出重定向到日志文件，你就能在后台运行的同时实时观察 Agent 的动作。**
-
-推荐方式一：`nohup` + 日志文件 + `tail -f`
-
-```bash
-cd my_agent
-mkdir -p logs
-nohup python -u heart.py > logs/heart.log 2>&1 &
-```
-
-后台启动后，可以实时查看：
-
-```bash
-tail -f logs/heart.log
-```
-
-这样你会看到：
-
-- 每次心跳触发后的模型输出
-- `HEARTBEAT_OK`
-- 整理 `day.md` 时的动作
-- play 触发后的轻量探索动作
-
-如果要停止后台心跳，可以先查进程：
-
-```bash
-ps -ef | grep 'python -u heart.py'
-```
-
-然后结束对应进程：
-
-```bash
-kill <PID>
-```
-
-推荐方式二：使用 `tmux`
-
-```bash
-cd my_agent
-tmux new -s heart 'python -u heart.py'
-```
-
-这样它会在一个独立会话里持续运行。你可以：
-
-- `Ctrl+b d`：暂时退出但不停止进程
-- `tmux attach -t heart`：重新进入查看实时输出
-
-如果你希望“后台运行但随时观察”，`tmux` 的体验通常比 `nohup` 更好；如果你希望“长期挂着并写日志”，`nohup + tail -f` 更简单。
+这个模式主要用于调试；日常使用更推荐统一调度器。`heart.py` 会提示自己处于调试模式。
 
 ## 整体架构图
 
@@ -118,59 +85,62 @@ tmux new -s heart 'python -u heart.py'
 └──────┬───────┘
        │ 输入消息
        v
-┌──────────────┐
-│   main.py    │ 普通对话入口
-└──────┬───────┘
-       │
-       v
-┌──────────────┐
-│   init.py    │ 组装 prompt / tools / agent
-└──────┬───────┘
-       │
-       ├──────────────────────────────┬──────────────────────────────┬──────────────────────┐
-       │                              │                              │                      │
-       v                              v                              v                      v
-┌──────────────┐            ┌────────────────────┐         ┌────────────────────┐  ┌──────────────────┐
-│ 规则文档区    │            │ 记忆注入区          │         │   工具区            │  │  Agent / LLM     │
-│ AGENT/ROLE   │            │ - 最近20轮对话      │         │ skills.py          │  │ 回复 / 决策 / 整理 │
-│ RELATION...  │            │ - day.md            │         │ memory_store.py    │  └────────┬─────────┘
-└──────────────┘            │ - 最近30天概括      │         └────────────────────┘           │
-                            └────────────────────┘                                            │
-                                                                                               │
-                                                                                               v
-                                                                                ┌──────────────────────────┐
-                                                                                │ 输出回复 + 写回记忆      │
-                                                                                │ - communicate.yaml      │
-                                                                                │ - temp_communicate.yaml │
-                                                                                │ - day.md                │
-                                                                                │ - 按需读取 month.md     │
-                                                                                └──────────────────────────┘
+┌────────────────────┐
+│ scheduler.py /     │
+│ main.py 统一入口    │
+└─────────┬──────────┘
+          │
+          ├──────────────────────────┬──────────────────────────┐
+          │                          │                          │
+          v                          v                          v
+┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐
+│ 前台对话区          │    │ 后台心跳区          │    │   日志文件          │
+│ - chat model       │    │ - heart model      │    │ logs/heartbeat_    │
+│ - 终端实时打印      │    │ - 静默整理记忆      │    │ log.yaml           │
+└─────────┬──────────┘    └─────────┬──────────┘    └────────────────────┘
+          │                         │
+          v                         v
+┌────────────────────┐    ┌────────────────────┐
+│ init.py            │    │ memory_store.py    │
+│ prompt / tool 装配  │    │ 共享记忆存储与锁    │
+└─────────┬──────────┘    └─────────┬──────────┘
+          │                         │
+          └──────────────┬──────────┘
+                         v
+              ┌────────────────────┐
+              │ memory / logs       │
+              │ yaml + md + log     │
+              └────────────────────┘
 ```
 
 ### 2. 运行时数据流
 
 ```text
 ┌────────────────────┐
-│ 普通对话主链路      │
+│ 统一调度器主循环    │
 └─────────┬──────────┘
           │
-          v
+          ├──────────────→ 前台等待用户输入
+          │
+          └──────────────→ 后台定时检查 heartbeat
+
+
 ┌────────────────────┐
-│ 用户消息            │
+│ 用户发送消息        │
 └─────────┬──────────┘
           │
           v
 ┌────────────────────┐
 │ init.py 组装输入    │
 │ - 规则文档          │
-│ - 最近20轮对话      │
+│ - 最近6轮对话       │
 │ - day.md            │
 │ - 最近30天概括      │
 └─────────┬──────────┘
           │
           v
 ┌────────────────────┐
-│ Agent / LLM 回复    │
+│ chat model 回复     │
 └─────────┬──────────┘
           │
           v
@@ -185,12 +155,7 @@ tmux new -s heart 'python -u heart.py'
 
 
 ┌────────────────────┐
-│ 心跳整理主链路      │
-└─────────┬──────────┘
-          │
-          v
-┌────────────────────┐
-│ heart.py 每秒 Boom  │
+│ 后台 heartbeat      │
 └─────────┬──────────┘
           │
           v
@@ -211,13 +176,16 @@ tmux new -s heart 'python -u heart.py'
           │
           v
 ┌────────────────────┐
-│ Agent / LLM 决策    │
+│ heart model 决策    │
 └─────────┬──────────┘
           │
           ├──────────────→ `HEARTBEAT_OK`
           ├──────────────→ 整理 `temp_communicate.yaml` 到 `day.md`
           ├──────────────→ 更新 `day.md` 概括 / 详细
-          └──────────────→ 在允许时执行低风险 play
+          └──────────────→ 把 prompt / 回复 / 时间写入 heartbeat 日志
+
+
+备注：chat 和 heartbeat 会并行调用各自的模型；共享的 memory 文件由 `memory_store.py` 串行保护，避免读写冲突。
 ```
 
 ### 3. 记忆层级视角
@@ -226,7 +194,7 @@ tmux new -s heart 'python -u heart.py'
 ┌────────────────────┐
 │ 短期上下文层        │
 │ communicate.yaml    │
-│ 最近 20 轮对话      │
+│ 保存最近 20 轮对话    │
 └─────────┬──────────┘
           │ 溢出
           v
@@ -256,13 +224,16 @@ tmux new -s heart 'python -u heart.py'
 
 ## 目录结构
 
-- `main.py`：普通对话入口
-- `heart.py`：心跳入口；每秒发送一次 `Boom`
+- `main.py`：统一调度入口，默认启动前台主对话 + 后台 heartbeat
+- `scheduler.py`：调度器实现，负责单入口启动、后台 heartbeat 和日志落盘
+- `heart.py`：单独调试 heartbeat 的前台入口
 - `init.py`：组装模型、系统提示、工具和输入上下文
 - `memory/memory_store.py`：记忆读写、日/月归档、心跳状态准备
-- `skills/skills.py`：暴露给 Agent 的工具
+- `skills/chat_skills.py`：前台对话区工具
+- `skills/heart_skills.py`：后台心跳区工具
 - `memory/md/`：自然语言记忆与规则文档
 - `memory/yaml/`：结构化状态与短期对话数据
+- `logs/heartbeat_log.yaml`：最近 100 条 heartbeat 日志，包含 `time` / `status` / `reasons` / `response` / `error`
 
 ## 整体工作流
 
@@ -271,7 +242,7 @@ tmux new -s heart 'python -u heart.py'
 用户消息进入 `main.py` 后，会走 `init.py` 里的普通对话链路：
 
 1. 注入基础人格与规则文档
-2. 注入最近 20 轮对话上下文
+2. 从 `communicate.yaml` 中截取最近 6 轮对话上下文
 3. 注入 `day.md`
 4. 注入最近 30 天概括
 5. 调用模型生成回复
@@ -280,7 +251,7 @@ tmux new -s heart 'python -u heart.py'
 
 ### 2. 心跳
 
-`heart.py` 会每秒发送一次 `Boom`，但不是每次都要求 Agent 做事。
+`heart.py` 调试模式下会每秒发送一次 `Boom`；统一调度器中的后台 heartbeat 则采用自适应节流：空闲时约 30 秒一次，temp 有积压时约 10 秒一次，达到整理条件时约 5 秒一次。它和前台主对话会并行工作，各自调用不同的模型。
 
 每次心跳前，系统会先：
 
@@ -291,7 +262,7 @@ tmux new -s heart 'python -u heart.py'
 5. 低概率触发一次 `play`
 6. 把这些状态用中文拼进心跳提示，再发送给 Agent
 
-Agent 再根据本次状态决定：
+heart 区模型再根据本次状态决定：
 
 - 直接回复 `HEARTBEAT_OK`
 - 整理 `temp_communicate.yaml` 到 `day.md`
@@ -304,7 +275,7 @@ Agent 再根据本次状态决定：
 
 - `memory/yaml/communicate.yaml`
   - 保存最近 20 轮对话
-  - 用于普通聊天的直接上下文注入
+  - 普通聊天时默认只截取最近 6 轮注入模型
 
 - `memory/yaml/temp_communicate.yaml`
   - 保存从 `communicate.yaml` 溢出的旧对话
@@ -339,7 +310,10 @@ Agent 再根据本次状态决定：
     - 最近一次心跳时间
     - 最近一次日归档时间
     - 最近一次临时对话整理提醒时间
+    - 最近一次临时对话整理完成时间
     - `play` 的启用状态、激活状态和触发时间
+
+  说明：运行中的聊天/心跳切换不再持久化到 `state.yaml`，而是由 `scheduler.py` 在内存里统一调度。
 
 ## 记忆日规则
 
@@ -358,7 +332,7 @@ Agent 再根据本次状态决定：
 ### 普通对话默认注入
 
 - 基础人格与规则文档
-- 最近 20 轮对话
+- 默认注入最近 6 轮对话（底层仍保存最近 20 轮）
 - `day.md`
 - 最近 30 天概括
 
@@ -372,22 +346,27 @@ Agent 再根据本次状态决定：
 
 ## Tool 设计
 
-当前 Agent 可用的核心工具包括：
+当前实现把工具按“脑区”拆成两组：
 
-- 读取 `state.yaml`
-- 更新 `state.yaml`
-- 读取最近 20 轮对话
-- 读取临时溢出对话
-- 删除已经处理完的临时对话轮次
-- 读取 `day.md`
-- 更新 `day.md` 的概括
-- 向 `day.md` 详细部分追加内容
-- 按日期读取 `month.md` 中某一天的完整内容
+- 对话区 `skills/chat_skills.py`
+  - `run_command`
+  - `read_month_day`
+
+- 心跳区 `skills/heart_skills.py`
+  - `run_command`
+  - `read_state`
+  - `update_state`
+  - `read_temp_communicate`
+  - `delete_temp_rounds`
+  - `update_day_summary`
+  - `append_day_md`
+  - `read_month_day`
 
 其中：
 
 - 最近 30 天概括是**默认注入**的，不需要额外工具读取
-- 只有当 Agent 想看某一天的完整细节时，才调用 `read_month_day`
+- `day.md` / `temp_communicate.yaml` / `state.yaml` 的维护能力只开放给心跳区
+- 对话区默认不直接操作日记忆整理流程
 
 ## 玩耍机制
 
@@ -408,9 +387,10 @@ Agent 再根据本次状态决定：
 当前架构里：
 
 - 对话到 `communicate.yaml` / `temp_communicate.yaml` 的转移是程序自动做的
-- `day.md` 的整理主要由 Agent 在心跳中完成
+- `day.md` 的整理主要由 heart 区模型在心跳中完成
 - `month.md` 的归档是程序在凌晨 4:00 后自动完成的
 - `month.md` 的“某一天详细内容检索”通过工具完成
+- chat 和 heartbeat 会并行工作，但共享存储由 `memory_store.py` 统一加锁保护
 
 因此这是一个：
 

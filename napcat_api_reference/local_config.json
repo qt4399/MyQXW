@@ -1,0 +1,6 @@
+{
+  "ws_url": "ws://127.0.0.1:3001/",
+  "api_only_ws_url": "ws://127.0.0.1:3001/api",
+  "token": "xj.Y3n2tQdK9ZNT-",
+  "timeout": 10
+}
