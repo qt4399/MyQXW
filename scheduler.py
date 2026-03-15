@@ -9,7 +9,7 @@ import yaml
 
 from heart import build_heartbeat_prompt
 from init import build_agent, build_heart, chat as run_chat_response, chat_stream as stream_chat_response, run_heart
-from memory.memory_store import ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
+from memory.memory_store import DEFAULT_SESSION_ID, ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
@@ -162,11 +162,11 @@ class AgentScheduler:
             finally:
                 self._schedule_next_heartbeat(state)
 
-    def chat(self, user_prompt: str) -> str:
-        return run_chat_response(self.chat_agent, user_prompt)
+    def chat(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
+        return run_chat_response(self.chat_agent, user_prompt, session_id=session_id)
 
-    def chat_stream(self, user_prompt: str) -> Iterator[str]:
-        return stream_chat_response(self.chat_agent, user_prompt)
+    def chat_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> Iterator[str]:
+        return stream_chat_response(self.chat_agent, user_prompt, session_id=session_id)
 
 
 def main() -> None:

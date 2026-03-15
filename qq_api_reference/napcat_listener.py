@@ -38,7 +38,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
-from napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
+try:
+    from .napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
+except ImportError:
+    from napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
 
 
 # 事件类型常量

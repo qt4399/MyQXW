@@ -24,7 +24,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from .napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
+try:
+    from .napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
+except ImportError:
+    from napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
 
 
 class NapCatAPI:

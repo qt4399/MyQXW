@@ -8,6 +8,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from memory.memory_store import (
+    DEFAULT_SESSION_ID,
     append_dialogue_round,
     ensure_memory_layout,
     now_iso,
@@ -99,9 +100,9 @@ def build_heart():
     return create_react_agent(llm, tools=HEART_TOOLS)
 
 
-def build_input(user_prompt: str) -> dict[str, list[dict[str, str]]]:
+def build_input(user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> dict[str, list[dict[str, str]]]:
     clean_prompt = _normalize_user_prompt(user_prompt)
-    snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS)
+    snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS, session_id=session_id)
     messages = [_system_message(include_heartbeat=False, snapshot=snapshot)]
     messages.extend(snapshot["recent_messages"])
     messages.append({"role": "user", "content": clean_prompt})
@@ -156,6 +157,7 @@ def _stream_agent_response(
 def chat_stream(
     agent,
     user_prompt: str,
+    session_id: str = DEFAULT_SESSION_ID,
     should_interrupt: Callable[[], bool] | None = None,
 ) -> Iterator[str]:
     clean_prompt = _normalize_user_prompt(user_prompt)
@@ -164,7 +166,7 @@ def chat_stream(
     stream_completed = False
     full_response = ""
     try:
-        payload = build_input(clean_prompt)
+        payload = build_input(clean_prompt, session_id=session_id)
         for chunk, metadata in agent.stream(payload, stream_mode="messages"):
             if should_interrupt and should_interrupt():
                 return
@@ -174,15 +176,20 @@ def chat_stream(
                 full_response += text
                 yield text
 
-        append_dialogue_round(clean_prompt, full_response.strip())
+        append_dialogue_round(clean_prompt, full_response.strip(), session_id=session_id)
         stream_completed = True
     finally:
         if stream_completed:
             update_state({"last_assistant_message_at": now_iso()})
 
 
-def chat(agent, user_prompt: str, should_interrupt: Callable[[], bool] | None = None) -> str:
-    return "".join(chat_stream(agent, user_prompt, should_interrupt=should_interrupt)).strip()
+def chat(
+    agent,
+    user_prompt: str,
+    session_id: str = DEFAULT_SESSION_ID,
+    should_interrupt: Callable[[], bool] | None = None,
+) -> str:
+    return "".join(chat_stream(agent, user_prompt, session_id=session_id, should_interrupt=should_interrupt)).strip()
 
 
 def run_heart(

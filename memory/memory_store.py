@@ -23,6 +23,7 @@ COMMUNICATE_PATH = YAML_DIR / "communicate.yaml"
 TEMP_COMMUNICATE_PATH = YAML_DIR / "temp_communicate.yaml"
 DAY_MD_PATH = MD_DIR / "day.md"
 MONTH_MD_PATH = MD_DIR / "month.md"
+DEFAULT_SESSION_ID = "main:owner"
 
 STORAGE_LOCK = threading.RLock()
 
@@ -146,17 +147,125 @@ def _default_state() -> dict[str, Any]:
 
 def _default_communicate() -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
+        "default_session_id": DEFAULT_SESSION_ID,
         "max_rounds": COMMUNICATE_WINDOW,
         "rounds": [],
+        "sessions": {},
     }
 
 
 def _default_temp_communicate() -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
+        "default_session_id": DEFAULT_SESSION_ID,
+        "rounds": [],
+        "sessions": {},
+    }
+
+
+def _default_session_communicate() -> dict[str, Any]:
+    return {
+        "max_rounds": COMMUNICATE_WINDOW,
         "rounds": [],
     }
+
+
+def _default_session_temp() -> dict[str, Any]:
+    return {
+        "rounds": [],
+    }
+
+
+def normalize_session_id(session_id: str | None = None) -> str:
+    clean = str(session_id or "").strip()
+    return clean or DEFAULT_SESSION_ID
+
+
+def build_session_id(source: str, chat_type: str | None = None, target_id: str | int | None = None) -> str:
+    clean_source = str(source or "").strip().lower()
+    if clean_source in {"", "main", "local"}:
+        return DEFAULT_SESSION_ID
+
+    if clean_source == "qq":
+        clean_type = str(chat_type or "").strip().lower()
+        if clean_type not in {"private", "group"}:
+            raise ValueError("qq 会话类型必须是 private 或 group")
+
+        clean_target = str(target_id or "").strip()
+        if not clean_target:
+            raise ValueError("qq 会话必须提供有效的 target_id")
+
+        return f"qq:{clean_type}:{clean_target}"
+
+    raise ValueError(f"不支持的会话来源: {source}")
+
+
+def _normalize_round_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _normalize_communicate_root(data: dict[str, Any]) -> dict[str, Any]:
+    root = dict(_default_communicate())
+    root.update(data)
+
+    default_session_id = normalize_session_id(root.get("default_session_id"))
+    sessions: dict[str, dict[str, Any]] = {}
+    raw_sessions = root.get("sessions")
+    if isinstance(raw_sessions, dict):
+        for session_key, session_data in raw_sessions.items():
+            if not isinstance(session_data, dict):
+                continue
+            sessions[str(session_key)] = {
+                "max_rounds": int(session_data.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW),
+                "rounds": _normalize_round_items(session_data.get("rounds", [])),
+            }
+
+    legacy_rounds = _normalize_round_items(root.get("rounds", []))
+    if default_session_id not in sessions:
+        sessions[default_session_id] = {
+            "max_rounds": int(root.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW),
+            "rounds": legacy_rounds,
+        }
+
+    main_session = sessions[default_session_id]
+    root["version"] = 2
+    root["default_session_id"] = default_session_id
+    root["sessions"] = sessions
+    root["max_rounds"] = int(main_session.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW)
+    root["rounds"] = _normalize_round_items(main_session.get("rounds", []))
+    return root
+
+
+def _normalize_temp_root(data: dict[str, Any]) -> dict[str, Any]:
+    root = dict(_default_temp_communicate())
+    root.update(data)
+
+    default_session_id = normalize_session_id(root.get("default_session_id"))
+    sessions: dict[str, dict[str, Any]] = {}
+    raw_sessions = root.get("sessions")
+    if isinstance(raw_sessions, dict):
+        for session_key, session_data in raw_sessions.items():
+            if not isinstance(session_data, dict):
+                continue
+            sessions[str(session_key)] = {
+                "rounds": _normalize_round_items(session_data.get("rounds", [])),
+            }
+
+    legacy_rounds = _normalize_round_items(root.get("rounds", []))
+    if default_session_id not in sessions:
+        sessions[default_session_id] = {
+            "rounds": legacy_rounds,
+        }
+
+    main_session = sessions[default_session_id]
+    root["version"] = 2
+    root["default_session_id"] = default_session_id
+    root["sessions"] = sessions
+    root["rounds"] = _normalize_round_items(main_session.get("rounds", []))
+    return root
 
 
 def _day_template(date_value: str | None = None) -> str:
@@ -221,31 +330,66 @@ def update_state(patch: dict[str, Any]) -> dict[str, Any]:
         return write_state(state)
 
 
-def read_communicate() -> dict[str, Any]:
+def read_communicate(session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        communicate = _read_yaml(COMMUNICATE_PATH, _default_communicate())
-        communicate["max_rounds"] = int(communicate.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW)
-        communicate["rounds"] = list(communicate.get("rounds", []))
-        return communicate
+        root = _normalize_communicate_root(_read_yaml(COMMUNICATE_PATH, _default_communicate()))
+        session_key = normalize_session_id(session_id)
+        session = dict(root.get("sessions", {}).get(session_key, _default_session_communicate()))
+        session["version"] = root["version"]
+        session["session_id"] = session_key
+        session["max_rounds"] = int(session.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW)
+        session["rounds"] = _normalize_round_items(session.get("rounds", []))
+        return session
 
 
-def write_communicate(data: dict[str, Any]) -> dict[str, Any]:
+def write_communicate(data: dict[str, Any], session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        _write_yaml(COMMUNICATE_PATH, data)
-        return data
+        root = _normalize_communicate_root(_read_yaml(COMMUNICATE_PATH, _default_communicate()))
+        session_key = normalize_session_id(session_id or data.get("session_id"))
+        session_payload = {
+            "max_rounds": int(data.get("max_rounds", COMMUNICATE_WINDOW) or COMMUNICATE_WINDOW),
+            "rounds": _normalize_round_items(data.get("rounds", [])),
+        }
+        root["sessions"][session_key] = session_payload
+        if session_key == root["default_session_id"]:
+            root["max_rounds"] = session_payload["max_rounds"]
+            root["rounds"] = list(session_payload["rounds"])
+        _write_yaml(COMMUNICATE_PATH, root)
+        return {
+            "version": root["version"],
+            "session_id": session_key,
+            "max_rounds": session_payload["max_rounds"],
+            "rounds": list(session_payload["rounds"]),
+        }
 
 
-def read_temp_communicate() -> dict[str, Any]:
+def read_temp_communicate(session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        temp = _read_yaml(TEMP_COMMUNICATE_PATH, _default_temp_communicate())
-        temp["rounds"] = list(temp.get("rounds", []))
-        return temp
+        root = _normalize_temp_root(_read_yaml(TEMP_COMMUNICATE_PATH, _default_temp_communicate()))
+        session_key = normalize_session_id(session_id)
+        session = dict(root.get("sessions", {}).get(session_key, _default_session_temp()))
+        session["version"] = root["version"]
+        session["session_id"] = session_key
+        session["rounds"] = _normalize_round_items(session.get("rounds", []))
+        return session
 
 
-def write_temp_communicate(data: dict[str, Any]) -> dict[str, Any]:
+def write_temp_communicate(data: dict[str, Any], session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        _write_yaml(TEMP_COMMUNICATE_PATH, data)
-        return data
+        root = _normalize_temp_root(_read_yaml(TEMP_COMMUNICATE_PATH, _default_temp_communicate()))
+        session_key = normalize_session_id(session_id or data.get("session_id"))
+        session_payload = {
+            "rounds": _normalize_round_items(data.get("rounds", [])),
+        }
+        root["sessions"][session_key] = session_payload
+        if session_key == root["default_session_id"]:
+            root["rounds"] = list(session_payload["rounds"])
+        _write_yaml(TEMP_COMMUNICATE_PATH, root)
+        return {
+            "version": root["version"],
+            "session_id": session_key,
+            "rounds": list(session_payload["rounds"]),
+        }
 
 
 def _new_round(user_text: str, assistant_text: str) -> dict[str, Any]:
@@ -257,10 +401,11 @@ def _new_round(user_text: str, assistant_text: str) -> dict[str, Any]:
     }
 
 
-def append_dialogue_round(user_text: str, assistant_text: str) -> dict[str, Any]:
+def append_dialogue_round(user_text: str, assistant_text: str, session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        communicate = read_communicate()
-        temp = read_temp_communicate()
+        session_key = normalize_session_id(session_id)
+        communicate = read_communicate(session_key)
+        temp = read_temp_communicate(session_key)
 
         round_item = _new_round(user_text, assistant_text)
         rounds = list(communicate.get("rounds", []))
@@ -270,7 +415,7 @@ def append_dialogue_round(user_text: str, assistant_text: str) -> dict[str, Any]
         overflow_count = max(0, len(rounds) - max_rounds)
         overflow_rounds = rounds[:overflow_count]
         communicate["rounds"] = rounds[overflow_count:]
-        write_communicate(communicate)
+        write_communicate(communicate, session_id=session_key)
 
         if overflow_rounds:
             temp_rounds = list(temp.get("rounds", []))
@@ -280,15 +425,15 @@ def append_dialogue_round(user_text: str, assistant_text: str) -> dict[str, Any]
                 overflow_item["moved_at"] = moved_at
                 temp_rounds.append(overflow_item)
             temp["rounds"] = temp_rounds
-            write_temp_communicate(temp)
+            write_temp_communicate(temp, session_id=session_key)
 
         return round_item
 
 
-def recent_conversation_messages(max_rounds: int | None = None) -> list[dict[str, str]]:
+def recent_conversation_messages(max_rounds: int | None = None, session_id: str | None = None) -> list[dict[str, str]]:
     with STORAGE_LOCK:
         messages: list[dict[str, str]] = []
-        rounds = list(read_communicate().get("rounds", []))
+        rounds = list(read_communicate(session_id=session_id).get("rounds", []))
         if max_rounds is not None and max_rounds > 0:
             rounds = rounds[-max_rounds:]
         for round_item in rounds:
@@ -301,10 +446,10 @@ def recent_conversation_messages(max_rounds: int | None = None) -> list[dict[str
         return messages
 
 
-def read_prompt_snapshot(max_rounds: int | None = None) -> dict[str, Any]:
+def read_prompt_snapshot(max_rounds: int | None = None, session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
         return {
-            "recent_messages": recent_conversation_messages(max_rounds=max_rounds),
+            "recent_messages": recent_conversation_messages(max_rounds=max_rounds, session_id=session_id),
             "day_md": read_day_md().strip(),
             "month_summaries": read_month_summaries().strip(),
         }
