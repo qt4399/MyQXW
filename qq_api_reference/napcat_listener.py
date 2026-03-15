@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable
 
 from napcat_ws_client import NapCatWSClient, NapCatConfig, load_config
@@ -109,17 +110,24 @@ class Event:
     @property
     def raw_message(self) -> str:
         """原始消息文本"""
-        return self.raw.get("raw_message", "")
+        value = self.raw.get("raw_message", "")
+        return value if isinstance(value, str) else str(value or "")
 
     @property
     def message(self) -> list | str:
         """消息内容（数组或字符串）"""
-        return self.raw.get("message", [])
+        value = self.raw.get("message", [])
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return value
+        return []
 
     @property
     def sender(self) -> dict:
         """发送者信息"""
-        return self.raw.get("sender", {})
+        value = self.raw.get("sender", {})
+        return value if isinstance(value, dict) else {}
 
     @property
     def nickname(self) -> str:
@@ -159,8 +167,13 @@ class Event:
         if not self.is_group():
             return False
         for seg in self.message if isinstance(self.message, list) else []:
+            if not isinstance(seg, dict):
+                continue
             if seg.get("type") == MessageType.AT:
-                if str(seg.get("data", {}).get("qq", "")) == str(self.self_id):
+                data = seg.get("data", {})
+                if not isinstance(data, dict):
+                    continue
+                if str(data.get("qq", "")) == str(self.self_id):
                     return True
         return False
 
@@ -170,9 +183,89 @@ class Event:
             return self.message
         texts = []
         for seg in self.message:
+            if not isinstance(seg, dict):
+                continue
             if seg.get("type") == MessageType.TEXT:
-                texts.append(seg.get("data", {}).get("text", ""))
+                data = seg.get("data", {})
+                if isinstance(data, dict):
+                    texts.append(str(data.get("text", "")))
         return "".join(texts)
+
+    def _format_timestamp(self) -> str | None:
+        if self.time is None:
+            return None
+        try:
+            return datetime.fromtimestamp(self.time).astimezone().isoformat(timespec="seconds")
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    def _format_message_segments(self) -> list[dict[str, Any]] | str:
+        if isinstance(self.message, str):
+            return self.message
+
+        segments: list[dict[str, Any]] = []
+        for seg in self.message if isinstance(self.message, list) else []:
+            if not isinstance(seg, dict):
+                segments.append({"type": "unknown", "value": seg})
+                continue
+            seg_type = str(seg.get("type", ""))
+            raw_data = seg.get("data", {}) or {}
+            data = raw_data if isinstance(raw_data, dict) else {"value": raw_data}
+            item: dict[str, Any] = {"type": seg_type}
+
+            if seg_type == MessageType.TEXT:
+                item["text"] = data.get("text", "")
+            elif seg_type == MessageType.AT:
+                item["qq"] = data.get("qq")
+            elif seg_type == MessageType.REPLY:
+                item["reply_id"] = data.get("id")
+            else:
+                item["data"] = data
+
+            segments.append(item)
+        return segments
+
+    def to_dict(self, *, include_raw: bool = False) -> dict[str, Any]:
+        """返回更适合阅读和序列化的事件字典"""
+        payload = {
+            "event_type": {
+                "post_type": self.post_type,
+                "message_type": self.message_type or None,
+                "notice_type": self.notice_type or None,
+                "request_type": self.request_type or None,
+                "sub_type": self.sub_type or None,
+            },
+            "time": {
+                "timestamp": self.time,
+                "iso": self._format_timestamp(),
+            },
+            "self_id": self.self_id,
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "message_id": self.message_id,
+            "sender": {
+                "nickname": self.nickname or None,
+                "card": self.card or None,
+                "display_name": self.display_name or None,
+                "details": self.sender,
+            },
+            "message": {
+                "raw_message": self.raw_message or None,
+                "text": self.get_text_content() or None,
+                "segments": self._format_message_segments(),
+            },
+            "flags": {
+                "is_private": self.is_private(),
+                "is_group": self.is_group(),
+                "is_at_self": self.is_at_self(),
+            },
+        }
+        if include_raw:
+            payload["raw"] = self.raw
+        return payload
+
+    def pretty_json(self, *, include_raw: bool = False, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(include_raw=include_raw), ensure_ascii=False, indent=indent)
 
     def __getitem__(self, key: str) -> Any:
         return self.raw[key]
@@ -181,7 +274,10 @@ class Event:
         return self.raw.get(key, default)
 
     def __repr__(self) -> str:
-        return f"Event({self.post_type}, user={self.user_id}, group={self.group_id})"
+        return f"Event(post_type={self.post_type!r}, user_id={self.user_id!r}, group_id={self.group_id!r}, text={self.get_text_content()!r})"
+
+    def __str__(self) -> str:
+        return self.pretty_json()
 
 
 class NapCatListener:
@@ -373,7 +469,6 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="NapCat 事件监听器")
-    parser.add_argument("--compact", action="store_true", help="紧凑输出")
     parser.add_argument("--filter", choices=["private", "group", "notice", "request"], help="只显示指定类型事件")
     args = parser.parse_args()
 
@@ -388,12 +483,17 @@ def main() -> None:
                 return
             if args.filter == "request" and event.post_type != EventType.REQUEST:
                 return
-
-        # 输出
-        if args.compact:
-            print(json.dumps(event.raw, ensure_ascii=False))
-        else:
-            print(json.dumps(event.raw, ensure_ascii=False, indent=2))
+        # print(event.to_dict())
+        # print(event.to_dict()["event_type"]["post_type"])
+        if event.to_dict()["event_type"]["post_type"]=="message":
+            if event.to_dict()["flags"]["is_group"]:
+                print("【是群聊】")
+                print(event.to_dict()["message"]["raw_message"])
+                print(event.to_dict()["sender"]["details"]["user_id"])
+            elif event.to_dict()["flags"]["is_private"]:
+                print("【是私聊】")
+                print(event.to_dict()["message"]["raw_message"])
+                print(event.to_dict()["sender"]["details"]["user_id"])
 
     listener = NapCatListener(on_event)
 

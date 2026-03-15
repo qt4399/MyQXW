@@ -3,12 +3,12 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
 from heart import build_heartbeat_prompt
-from init import build_agent, build_heart, run_heart, run_stream
+from init import build_agent, build_heart, chat as run_chat_response, chat_stream as stream_chat_response, run_heart
 from memory.memory_store import ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -162,27 +162,21 @@ class AgentScheduler:
             finally:
                 self._schedule_next_heartbeat(state)
 
-    def run_chat(self, user_prompt: str) -> str:
-        return run_stream(self.chat_agent, user_prompt, show_output=True)
+    def chat(self, user_prompt: str) -> str:
+        return run_chat_response(self.chat_agent, user_prompt)
+
+    def chat_stream(self, user_prompt: str) -> Iterator[str]:
+        return stream_chat_response(self.chat_agent, user_prompt)
 
 
 def main() -> None:
     scheduler = AgentScheduler()
     scheduler.start()
-    print(f"[调度器] 已启动。主对话走前台，heartbeat 在后台静默运行。")
+    print(f"[调度器] 已启动。heartbeat 在后台静默运行。")
     print(f"[调度器] heartbeat 日志文件：{HEARTBEAT_LOG_PATH}")
     try:
         while True:
-            try:
-                question = input("用户：").strip()
-            except EOFError:
-                break
-            if not question:
-                continue
-            try:
-                scheduler.run_chat(question)
-            except Exception as exc:
-                print(f"[调度器] 主对话发生异常：{type(exc).__name__}: {exc}")
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\n[调度器] 收到中断，准备退出。")
     finally:

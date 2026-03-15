@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -14,8 +14,8 @@ from memory.memory_store import (
     read_prompt_snapshot,
     update_state,
 )
-from skills.chat_skills import CHAT_TOOLS
-from skills.heart_skills import HEART_TOOLS
+from skills.chat_base_skills import CHAT_TOOLS
+from skills.heart_base_skills import HEART_TOOLS
 
 BASE_DIR = Path(__file__).resolve().parent
 MEMORY_DIR = BASE_DIR / "memory"
@@ -153,20 +153,36 @@ def _stream_agent_response(
     return full_response.strip()
 
 
-def run_stream(agent, user_prompt: str, show_output: bool = True) -> str:
+def chat_stream(
+    agent,
+    user_prompt: str,
+    should_interrupt: Callable[[], bool] | None = None,
+) -> Iterator[str]:
     clean_prompt = _normalize_user_prompt(user_prompt)
     update_state({"last_user_message_at": now_iso()})
 
-    response_text = ""
     stream_completed = False
+    full_response = ""
     try:
-        response_text = _stream_agent_response(agent, build_input(clean_prompt), show_output=show_output)
-        append_dialogue_round(clean_prompt, response_text)
+        payload = build_input(clean_prompt)
+        for chunk, metadata in agent.stream(payload, stream_mode="messages"):
+            if should_interrupt and should_interrupt():
+                return
+            if metadata.get("langgraph_node") != "agent":
+                continue
+            for text in _iter_text_fragments(getattr(chunk, "content", "")):
+                full_response += text
+                yield text
+
+        append_dialogue_round(clean_prompt, full_response.strip())
         stream_completed = True
-        return response_text
     finally:
         if stream_completed:
             update_state({"last_assistant_message_at": now_iso()})
+
+
+def chat(agent, user_prompt: str, should_interrupt: Callable[[], bool] | None = None) -> str:
+    return "".join(chat_stream(agent, user_prompt, should_interrupt=should_interrupt)).strip()
 
 
 def run_heart(
