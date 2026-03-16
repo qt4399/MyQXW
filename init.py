@@ -13,8 +13,9 @@ from memory.memory_store import (
     read_prompt_snapshot,
     update_state,
 )
-from skills.chat_base_skills import CHAT_TOOLS
-from skills.heart_base_skills import HEART_TOOLS
+from skill.chat_base_skill import CHAT_TOOLS
+from skill.chat_extra_skill import CHAT_EXTRA_TOOLS
+from skill.heart_base_skill import HEART_TOOLS
 
 BASE_DIR = Path(__file__).resolve().parent
 MEMORY_DIR = BASE_DIR / "memory"
@@ -125,7 +126,7 @@ def build_logic():
         base_url=config["gpt_base_url"],
         temperature=0,
     )
-    return create_react_agent(llm, tools=CHAT_TOOLS)
+    return create_react_agent(llm, tools=CHAT_TOOLS + CHAT_EXTRA_TOOLS)
 
 
 def build_heart():

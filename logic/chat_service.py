@@ -14,6 +14,7 @@ from memory.memory_store import (
 )
 
 from .logic_service import LogicService
+from .runtime_context import bind_session_id
 
 STREAM_CHUNK_SIZE = 24
 
@@ -44,7 +45,8 @@ class ChatService:
         clean_prompt = normalize_user_prompt(user_prompt)
         update_state({"last_user_message_at": now_iso()})
 
-        logic_reply = self.logic_service.logic(clean_prompt, session_id=session_id).strip()
+        with bind_session_id(session_id):
+            logic_reply = self.logic_service.logic(clean_prompt, session_id=session_id).strip()
         final_reply = logic_reply
 
         if logic_reply:

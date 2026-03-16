@@ -322,6 +322,54 @@ class NapCatAPI:
             params["group_id"] = str(group_id)
         return self.call("get_file", params)
 
+    def upload_private_file(
+        self,
+        user_id: str | int,
+        file: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """上传私聊文件
+
+        Args:
+            user_id: 目标用户 ID
+            file: 本地文件路径
+            name: 展示文件名，默认取 file 的文件名
+        """
+        resolved_name = name or Path(file).name or str(file)
+        return self.call(
+            "upload_private_file",
+            {
+                "user_id": str(user_id),
+                "file": file,
+                "name": resolved_name,
+            },
+        )
+
+    def upload_group_file(
+        self,
+        group_id: str | int,
+        file: str,
+        name: str | None = None,
+        folder: str | None = None,
+    ) -> dict[str, Any]:
+        """上传群文件
+
+        Args:
+            group_id: 目标群 ID
+            file: 本地文件路径
+            name: 展示文件名，默认取 file 的文件名
+            folder: 群文件夹标识，留空则上传到默认位置
+        """
+        resolved_name = name or Path(file).name or str(file)
+        params = {
+            "group_id": str(group_id),
+            "file": file,
+            "name": resolved_name,
+        }
+        if folder:
+            params["folder"] = folder
+        return self.call("upload_group_file", params)
+
     # ==================== 类方法：单次调用 ====================
 
     @classmethod
@@ -350,3 +398,20 @@ def send_group(group_id: str | int, message: str) -> dict[str, Any]:
     """快捷发送群消息"""
     with NapCatAPI() as api:
         return api.send_group_msg(group_id, message)
+
+
+def upload_private_file(user_id: str | int, file: str, name: str | None = None) -> dict[str, Any]:
+    """快捷上传私聊文件"""
+    with NapCatAPI() as api:
+        return api.upload_private_file(user_id, file, name=name)
+
+
+def upload_group_file(
+    group_id: str | int,
+    file: str,
+    name: str | None = None,
+    folder: str | None = None,
+) -> dict[str, Any]:
+    """快捷上传群文件"""
+    with NapCatAPI() as api:
+        return api.upload_group_file(group_id, file, name=name, folder=folder)

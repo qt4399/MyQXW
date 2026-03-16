@@ -16,7 +16,7 @@ def _json_result(**payload: object) -> str:
 
 @tool("run_command")
 def run_command(command: str) -> str:
-    """对话区工具：运行 Linux bash 命令，并返回 stdout、stderr 和 returncode 的 JSON 字符串。"""
+    """系统工具：你拥有非常高的权限能够运行 Linux bash 命令，并返回 stdout、stderr 和 returncode 的 JSON 字符串。"""
     print(f"[chat] 运行命令: {command}")
     completed = subprocess.run(
         ["bash", "-lc", command],
