@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import time
 
-from scheduler import AgentScheduler
+from congnition.heart_service import HeartService
+from logic.chat_service import ChatService
 from transport.openai_api import OpenAICompatServer
 from transport.qq_bridge import QQBridge
 
 if __name__ == "__main__":
-    scheduler = AgentScheduler()
-    openai_transport = OpenAICompatServer(scheduler)
-    qq_bridge = QQBridge(scheduler)
+    chat_service = ChatService()
+    heart_service = HeartService()
+    openai_transport = OpenAICompatServer(chat_service)
+    qq_bridge = QQBridge(chat_service)
 
-    scheduler.start()
+    chat_service.start()
+    heart_service.start()
     openai_transport.start()
     qq_bridge.start()
 
@@ -25,5 +28,6 @@ if __name__ == "__main__":
     finally:
         qq_bridge.stop()
         openai_transport.stop()
-        scheduler.stop()
+        heart_service.stop()
+        chat_service.stop()
         print("[main] 已停止。")

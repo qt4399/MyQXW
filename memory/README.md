@@ -155,7 +155,7 @@
 - 最近一次临时对话整理完成时间
 - `play` 的启用/激活状态与触发时间
 
-运行中的聊天/心跳切换由 `scheduler.py` 在内存里调度，不再把 `chat / idle / heartbeat` 这类临时模式落到 `state.yaml`。
+运行中的聊天/心跳服务由 `logic/chat_service.py` 和 `congnition/heart_service.py` 在内存里运行，不再把 `chat / idle / heartbeat` 这类临时模式落到 `state.yaml`。
 
 其中：
 

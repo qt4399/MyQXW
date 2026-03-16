@@ -49,7 +49,7 @@ def _extract_prompt(messages: Any) -> str:
 
 class _OpenAIHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    scheduler = None
+    chat_service = None
     server_model = DEFAULT_MODEL
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003
@@ -113,7 +113,7 @@ class _OpenAIHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            reply = self.scheduler.chat(prompt)
+            reply = self.chat_service.chat(prompt)
         except Exception as exc:
             self._write_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -169,7 +169,7 @@ class _OpenAIHandler(BaseHTTPRequestHandler):
             }
             write_sse(first_chunk)
 
-            for text in self.scheduler.chat_stream(prompt):
+            for text in self.chat_service.chat_stream(prompt):
                 chunk = {
                     "id": request_id,
                     "object": "chat.completion.chunk",
@@ -212,12 +212,12 @@ class _OpenAIHandler(BaseHTTPRequestHandler):
 class OpenAICompatServer:
     def __init__(
         self,
-        scheduler,
+        chat_service,
         host: str = HOST,
         port: int = PORT,
         model: str = DEFAULT_MODEL,
     ) -> None:
-        self.scheduler = scheduler
+        self.chat_service = chat_service
         self.host = host
         self.port = port
         self.model = model
@@ -239,7 +239,7 @@ class OpenAICompatServer:
             "MyQXWOpenAIHandler",
             (_OpenAIHandler,),
             {
-                "scheduler": self.scheduler,
+                "chat_service": self.chat_service,
                 "server_model": self.model,
             },
         )

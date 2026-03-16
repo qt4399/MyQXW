@@ -10,13 +10,13 @@ from qq_api_reference.napcat_listener import Event, NapCatListener
 class QQBridge:
     def __init__(
         self,
-        scheduler,
+        chat_service,
         *,
         enable_private: bool = True,
         enable_group: bool = True,
         require_at_in_group: bool = True,
     ) -> None:
-        self.scheduler = scheduler
+        self.chat_service = chat_service
         self.enable_private = enable_private
         self.enable_group = enable_group
         self.require_at_in_group = require_at_in_group
@@ -75,7 +75,7 @@ class QQBridge:
             return
 
         session_id = build_session_id("qq", "private", event.user_id)
-        reply = self.scheduler.chat(prompt, session_id=session_id).strip()
+        reply = self.chat_service.chat(prompt, session_id=session_id).strip()
         if not reply:
             return
 
@@ -93,7 +93,7 @@ class QQBridge:
             return
 
         session_id = build_session_id("qq", "group", event.group_id)
-        reply = self.scheduler.chat(prompt, session_id=session_id).strip()
+        reply = self.chat_service.chat(prompt, session_id=session_id).strip()
         if not reply:
             return
 

@@ -3,15 +3,14 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import yaml
 
-from heart import build_heartbeat_prompt
-from init import build_agent, build_heart, chat as run_chat_response, chat_stream as stream_chat_response, run_heart
-from memory.memory_store import DEFAULT_SESSION_ID, ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
+from init import build_heart, run_heart
+from memory.memory_store import ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
 HEARTBEAT_LOG_PATH = LOG_DIR / "heartbeat_log.yaml"
 HEARTBEAT_LOOP_POLL_SECONDS = 0.5
@@ -19,6 +18,41 @@ HEARTBEAT_IDLE_INTERVAL_SECONDS = 30.0
 HEARTBEAT_TEMP_PENDING_INTERVAL_SECONDS = 10.0
 HEARTBEAT_DIGEST_DUE_INTERVAL_SECONDS = 5.0
 HEARTBEAT_LOG_MAX_ENTRIES = 100
+
+
+def build_heartbeat_prompt(state: dict[str, Any]) -> str:
+    reasons = state.get("reasons", [])
+    reason_text = "、".join(reasons) if reasons else "无"
+    play_text = "是" if state.get("play_triggered") else "否"
+    rolled_text = "是" if state.get("rolled_day") else "否"
+    oldest_text = state.get("temp_oldest_age_seconds")
+    oldest_value = str(oldest_text) if oldest_text is not None else "无"
+    digest_due = "临时对话整理" in reasons
+
+    lines = [
+        "Boom",
+        "",
+        "[本次心跳状态]",
+        f"- 当前具体时间：{state.get('current_time')}",
+        f"- 当前记忆日：{state.get('current_day')}",
+        f"- 本次是否触发玩耍：{play_text}",
+        f"- 本次是否发生归档：{rolled_text}",
+        f"- 临时对话轮数：{state.get('temp_round_count')}",
+        f"- 最旧临时对话等待秒数：{oldest_value}",
+        f"- 本次关注原因：{reason_text}",
+        "",
+    ]
+
+    if state.get("play_triggered"):
+        lines.append("如果本次触发了玩耍，可以进行一次低风险探索。")
+
+    if digest_due:
+        lines.append("本次已经满足临时对话整理条件；你现在可以读取 temp_communicate，整理成熟主题到 day.md，并删除已处理对话。")
+    else:
+        lines.append("如果本次关注原因里没有“临时对话整理”，不要主动读取 temp_communicate，也不要因为一两句零散内容就写入 day.md。")
+
+    lines.append("如果没有足够价值，直接回复 HEARTBEAT_OK。")
+    return "\n".join(lines)
 
 
 class HeartbeatLogStore:
@@ -82,10 +116,9 @@ class HeartbeatLogStore:
             self._write_entries()
 
 
-class AgentScheduler:
+class HeartService:
     def __init__(self) -> None:
         ensure_memory_layout()
-        self.chat_agent = build_agent()
         self.heart_agent = build_heart()
         self.stop_event = threading.Event()
         self.control_lock = threading.Lock()
@@ -96,13 +129,20 @@ class AgentScheduler:
             name="heartbeat-worker",
             daemon=True,
         )
+        self._started = False
 
     def start(self) -> None:
+        if self._started:
+            return
         self.heartbeat_thread.start()
+        self._started = True
 
     def stop(self) -> None:
+        if not self._started:
+            return
         self.stop_event.set()
         self.heartbeat_thread.join(timeout=5)
+        self._started = False
 
     def _heartbeat_due(self) -> bool:
         with self.control_lock:
@@ -162,27 +202,3 @@ class AgentScheduler:
             finally:
                 self._schedule_next_heartbeat(state)
 
-    def chat(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
-        return run_chat_response(self.chat_agent, user_prompt, session_id=session_id)
-
-    def chat_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> Iterator[str]:
-        return stream_chat_response(self.chat_agent, user_prompt, session_id=session_id)
-
-
-def main() -> None:
-    scheduler = AgentScheduler()
-    scheduler.start()
-    print(f"[调度器] 已启动。heartbeat 在后台静默运行。")
-    print(f"[调度器] heartbeat 日志文件：{HEARTBEAT_LOG_PATH}")
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[调度器] 收到中断，准备退出。")
-    finally:
-        scheduler.stop()
-        print("[调度器] 已停止。")
-
-
-if __name__ == "__main__":
-    main()

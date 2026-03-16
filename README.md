@@ -86,8 +86,8 @@ python -u heart.py
        │ 输入消息
        v
 ┌────────────────────┐
-│ scheduler.py /     │
-│ main.py 统一入口    │
+│ logic/chat_service │
+│ / main.py 统一入口 │
 └─────────┬──────────┘
           │
           ├──────────────────────────┬──────────────────────────┐
@@ -224,8 +224,9 @@ python -u heart.py
 
 ## 目录结构
 
-- `main.py`：统一调度入口，默认启动前台主对话 + 后台 heartbeat
-- `scheduler.py`：调度器实现，负责单入口启动、后台 heartbeat 和日志落盘
+- `main.py`：统一启动入口，默认启动 chat、后台 heart、OpenAI API 和 QQBridge
+- `logic/chat_service.py`：聊天服务实现，负责 chat agent 的创建与调用
+- `congnition/heart_service.py`：意识区服务实现，负责后台 heartbeat 和日志落盘
 - `heart.py`：单独调试 heartbeat 的前台入口
 - `init.py`：组装模型、系统提示、工具和输入上下文
 - `memory/memory_store.py`：记忆读写、日/月归档、心跳状态准备
@@ -313,7 +314,7 @@ heart 区模型再根据本次状态决定：
     - 最近一次临时对话整理完成时间
     - `play` 的启用状态、激活状态和触发时间
 
-  说明：运行中的聊天/心跳切换不再持久化到 `state.yaml`，而是由 `scheduler.py` 在内存里统一调度。
+  说明：运行中的聊天/心跳服务不再持久化到 `state.yaml`，而是分别由 `logic/chat_service.py` 与 `congnition/heart_service.py` 在内存里运行。
 
 ## 记忆日规则
 
