@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-
 from langchain_core.tools import tool
 
 from memory.memory_store import ensure_memory_layout, read_month_day

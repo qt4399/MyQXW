@@ -66,12 +66,45 @@ class ChatService:
         update_state({"last_assistant_message_at": now_iso()})
         return final_reply
 
+    def _build_logic_reply(self, clean_prompt: str, session_id: str) -> str:
+        with bind_session_id(session_id):
+            return self.logic_service.logic(clean_prompt, session_id=session_id).strip()
+
     def chat(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
         return self._build_final_reply(user_prompt, session_id=session_id)
 
     def chat_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> Iterator[str]:
-        reply = self._build_final_reply(user_prompt, session_id=session_id)
-        yield from _iter_reply_chunks(reply)
+        clean_prompt = normalize_user_prompt(user_prompt)
+        update_state({"last_user_message_at": now_iso()})
+
+        logic_reply = self._build_logic_reply(clean_prompt, session_id=session_id)
+        final_reply = logic_reply
+
+        if logic_reply:
+            try:
+                chunks: list[str] = []
+                for text in self.emotion_service.polish_stream(
+                    clean_prompt,
+                    logic_reply,
+                    session_id=session_id,
+                ):
+                    chunks.append(text)
+                    yield text
+                polished_reply = "".join(chunks).strip()
+            except Exception as exc:
+                print(f"[chat_service] 情感润色流式输出失败，回退到 logic 草稿: {type(exc).__name__}: {exc}")
+            else:
+                if polished_reply:
+                    final_reply = polished_reply
+                    append_dialogue_round(clean_prompt, final_reply, session_id=session_id)
+                    update_state({"last_assistant_message_at": now_iso()})
+                    return
+
+        for text in _iter_reply_chunks(final_reply):
+            yield text
+
+        append_dialogue_round(clean_prompt, final_reply, session_id=session_id)
+        update_state({"last_assistant_message_at": now_iso()})
 
 
 def main() -> None:

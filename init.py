@@ -292,6 +292,23 @@ def run_emotion(
     )
 
 
+def stream_emotion(
+    agent,
+    user_prompt: str,
+    logic_reply: str,
+    session_id: str = DEFAULT_SESSION_ID,
+    should_interrupt: Callable[[], bool] | None = None,
+) -> Iterator[str]:
+    payload = build_emotion_input(user_prompt, logic_reply, session_id=session_id)
+    for chunk, metadata in agent.stream(payload, stream_mode="messages"):
+        if should_interrupt and should_interrupt():
+            return
+        if metadata.get("langgraph_node") != "agent":
+            continue
+        for text in _iter_text_fragments(getattr(chunk, "content", "")):
+            yield text
+
+
 def run_heart(
     agent,
     user_prompt: str,

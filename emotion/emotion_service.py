@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from typing import Iterator
 
-from init import build_emotion, run_emotion
+from init import build_emotion, run_emotion, stream_emotion
 from memory.memory_store import DEFAULT_SESSION_ID, ensure_memory_layout
 
 
@@ -24,6 +25,19 @@ class EmotionService:
         session_id: str = DEFAULT_SESSION_ID,
     ) -> str:
         return run_emotion(
+            self.emotion_agent,
+            user_prompt,
+            logic_reply,
+            session_id=session_id,
+        )
+
+    def polish_stream(
+        self,
+        user_prompt: str,
+        logic_reply: str,
+        session_id: str = DEFAULT_SESSION_ID,
+    ) -> Iterator[str]:
+        return stream_emotion(
             self.emotion_agent,
             user_prompt,
             logic_reply,
