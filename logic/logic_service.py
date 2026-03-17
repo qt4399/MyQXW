@@ -18,11 +18,11 @@ class LogicService:
     def stop(self) -> None:
         return None
 
-    def logic(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
-        return run_logic(self.logic_agent, user_prompt, session_id=session_id)
+    def logic(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> str:
+        return run_logic(self.logic_agent, user_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
 
-    def logic_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> Iterator[str]:
-        return stream_logic(self.logic_agent, user_prompt, session_id=session_id)
+    def logic_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> Iterator[str]:
+        return stream_logic(self.logic_agent, user_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
 
 
 def main() -> None:

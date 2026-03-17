@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 from memory.memory_store import build_session_id
 from qq_api_reference.napcat_api import NapCatAPI
@@ -71,11 +72,19 @@ class QQBridge:
             return
 
         prompt = self._extract_prompt(event)
-        if not prompt:
+        picture = self._extract_picture(event)
+        if picture and not prompt:
+            prompt = "请用尽量简单的话识别这张图片。"
+        if not prompt and not picture:
             return
 
         session_id = build_session_id("qq", "private", event.user_id)
-        reply = self.chat_service.chat(prompt, session_id=session_id).strip()
+        reply = self.chat_service.chat(
+            prompt,
+            session_id=session_id,
+            enable_picture=bool(picture),
+            image_path=picture,
+        ).strip()
         if not reply:
             return
 
@@ -89,11 +98,19 @@ class QQBridge:
             return
 
         prompt = self._extract_prompt(event)
-        if not prompt:
+        picture = self._extract_picture(event)
+        if picture and not prompt:
+            prompt = "请识别这张图片。"
+        if not prompt and not picture:
             return
 
         session_id = build_session_id("qq", "group", event.group_id)
-        reply = self.chat_service.chat(prompt, session_id=session_id).strip()
+        reply = self.chat_service.chat(
+            prompt,
+            session_id=session_id,
+            enable_picture=bool(picture),
+            image_path=picture,
+        ).strip()
         if not reply:
             return
 
@@ -104,3 +121,31 @@ class QQBridge:
     def _extract_prompt(event: Event) -> str:
         text = event.get_text_content().strip()
         return text
+
+    @staticmethod
+    def _extract_picture(event: Event) -> str:
+        message = event.message
+        if not isinstance(message, list):
+            return ""
+
+        for seg in message:
+            if not isinstance(seg, dict) or seg.get("type") != "image":
+                continue
+
+            data = seg.get("data", {})
+            if not isinstance(data, dict):
+                continue
+
+            # NapCat 接收图片时通常会直接带 path；拿本地文件最稳。
+            for key in ("path", "file"):
+                value = str(data.get(key, "")).strip()
+                if not value:
+                    continue
+                if Path(value).exists():
+                    return value
+
+            url = str(data.get("url", "")).strip()
+            if url:
+                return url
+
+        return ""

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from congnition.heart_service import HeartService
-from logic.chat_service import ChatService
+from language.chat_service import ChatService
 from transport.openai_api import OpenAICompatServer
 from transport.qq_bridge import QQBridge
 

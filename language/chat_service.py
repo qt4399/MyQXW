@@ -13,8 +13,8 @@ from memory.memory_store import (
     update_state,
 )
 
-from .logic_service import LogicService
-from .runtime_context import bind_session_id
+from logic.logic_service import LogicService
+from logic.runtime_context import bind_session_id
 
 STREAM_CHUNK_SIZE = 24
 
@@ -41,12 +41,12 @@ class ChatService:
         self.emotion_service.stop()
         self.logic_service.stop()
 
-    def _build_final_reply(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
+    def _build_final_reply(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> str:
         clean_prompt = normalize_user_prompt(user_prompt)
         update_state({"last_user_message_at": now_iso()})
 
         with bind_session_id(session_id):
-            logic_reply = self.logic_service.logic(clean_prompt, session_id=session_id).strip()
+            logic_reply = self.logic_service.logic(clean_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path).strip()
         final_reply = logic_reply
 
         if logic_reply:
@@ -66,18 +66,18 @@ class ChatService:
         update_state({"last_assistant_message_at": now_iso()})
         return final_reply
 
-    def _build_logic_reply(self, clean_prompt: str, session_id: str) -> str:
+    def _build_logic_reply(self, clean_prompt: str, session_id: str,enable_picture: bool = False,image_path: str = "") -> str:
         with bind_session_id(session_id):
-            return self.logic_service.logic(clean_prompt, session_id=session_id).strip()
+            return self.logic_service.logic(clean_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path).strip()
 
-    def chat(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> str:
-        return self._build_final_reply(user_prompt, session_id=session_id)
+    def chat(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> str:
+        return self._build_final_reply(user_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
 
-    def chat_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> Iterator[str]:
+    def chat_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> Iterator[str]:
         clean_prompt = normalize_user_prompt(user_prompt)
         update_state({"last_user_message_at": now_iso()})
 
-        logic_reply = self._build_logic_reply(clean_prompt, session_id=session_id)
+        logic_reply = self._build_logic_reply(clean_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
         final_reply = logic_reply
 
         if logic_reply:

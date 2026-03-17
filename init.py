@@ -147,14 +147,42 @@ def build_emotion():
         temperature=0.8,
     )
     return create_react_agent(llm, tools=[])
+import base64
+import mimetypes
+def image_to_data_url(image_path: Path | str) -> str:
+    raw_path = str(image_path)
+    if raw_path.startswith(("http://", "https://", "data:", "base64://")):
+        return raw_path
 
+    path = Path(raw_path)
+    mime_type, _ = mimetypes.guess_type(path.name)
+    mime_type = mime_type or "application/octet-stream"
+    image_base64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{image_base64}"
 
-def build_input(user_prompt: str, session_id: str = DEFAULT_SESSION_ID) -> dict[str, list[dict[str, str]]]:
+def build_input(user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> dict[str, list[dict[str, str]]]:
     clean_prompt = normalize_user_prompt(user_prompt)
     snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS, session_id=session_id)
     messages = [_system_message(include_heartbeat=False, snapshot=snapshot)]
     messages.extend(snapshot["recent_messages"])
-    messages.append({"role": "user", "content": clean_prompt})
+    
+    if enable_picture:
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": clean_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_to_data_url(image_path),
+                        },
+                    },
+                ],
+            }
+        )
+    else:
+        messages.append({"role": "user", "content": clean_prompt})
     return {"messages": messages}
 
 
@@ -237,9 +265,11 @@ def stream_logic(
     user_prompt: str,
     session_id: str = DEFAULT_SESSION_ID,
     should_interrupt: Callable[[], bool] | None = None,
+    enable_picture: bool = False,
+    image_path: str = "",
 ) -> Iterator[str]:
     clean_prompt = normalize_user_prompt(user_prompt)
-    payload = build_input(clean_prompt, session_id=session_id)
+    payload = build_input(clean_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
     for chunk, metadata in agent.stream(payload, stream_mode="messages"):
         if should_interrupt and should_interrupt():
             return
@@ -254,26 +284,10 @@ def run_logic(
     user_prompt: str,
     session_id: str = DEFAULT_SESSION_ID,
     should_interrupt: Callable[[], bool] | None = None,
+    enable_picture: bool = False,
+    image_path: str = "",
 ) -> str:
-    return "".join(stream_logic(agent, user_prompt, session_id=session_id, should_interrupt=should_interrupt)).strip()
-
-
-def chat_stream(
-    agent,
-    user_prompt: str,
-    session_id: str = DEFAULT_SESSION_ID,
-    should_interrupt: Callable[[], bool] | None = None,
-) -> Iterator[str]:
-    return stream_logic(agent, user_prompt, session_id=session_id, should_interrupt=should_interrupt)
-
-
-def chat(
-    agent,
-    user_prompt: str,
-    session_id: str = DEFAULT_SESSION_ID,
-    should_interrupt: Callable[[], bool] | None = None,
-) -> str:
-    return run_logic(agent, user_prompt, session_id=session_id, should_interrupt=should_interrupt)
+    return "".join(stream_logic(agent, user_prompt, session_id=session_id, should_interrupt=should_interrupt,enable_picture=enable_picture,image_path=image_path)).strip()
 
 
 def run_emotion(
