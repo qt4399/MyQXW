@@ -1,4 +1,12 @@
 langgraph
+langchain-core
 langchain-openai
 openai
 PyYAML
+feedparser
+opencv-python
+websocket-client
+requests
+pdf2image
+playwright
+mss

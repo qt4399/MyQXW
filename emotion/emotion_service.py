@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Callable
 from typing import Iterator
 
 from init import build_emotion, run_emotion, stream_emotion
@@ -23,12 +24,14 @@ class EmotionService:
         user_prompt: str,
         logic_reply: str,
         session_id: str = DEFAULT_SESSION_ID,
+        should_interrupt: Callable[[], bool] | None = None,
     ) -> str:
         return run_emotion(
             self.emotion_agent,
             user_prompt,
             logic_reply,
             session_id=session_id,
+            should_interrupt=should_interrupt,
         )
 
     def polish_stream(
@@ -36,12 +39,14 @@ class EmotionService:
         user_prompt: str,
         logic_reply: str,
         session_id: str = DEFAULT_SESSION_ID,
+        should_interrupt: Callable[[], bool] | None = None,
     ) -> Iterator[str]:
         return stream_emotion(
             self.emotion_agent,
             user_prompt,
             logic_reply,
             session_id=session_id,
+            should_interrupt=should_interrupt,
         )
 
 

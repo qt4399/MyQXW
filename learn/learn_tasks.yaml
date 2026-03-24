@@ -1,0 +1,16 @@
+version: 1
+tasks:
+  - id: literature_agent
+    name: Agent文献巡检
+    enabled: false
+    runner: literature_poll
+    interval_seconds: 21600
+    options:
+      category: agent
+      topic: 多智能体系统
+      search_queries_per_topic: 3
+      query_pool_size: 9
+      query_plan_refresh_seconds: 600
+      max_results: 100
+      max_new_papers_per_run: 3
+      max_analyzed_papers_per_run: 12

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Callable
 from typing import Iterator
 
 from init import build_logic, run_logic, stream_logic
@@ -18,11 +19,39 @@ class LogicService:
     def stop(self) -> None:
         return None
 
-    def logic(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> str:
-        return run_logic(self.logic_agent, user_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
+    def logic(
+        self,
+        user_prompt: str,
+        session_id: str = DEFAULT_SESSION_ID,
+        enable_picture: bool = False,
+        image_path: str = "",
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> str:
+        return run_logic(
+            self.logic_agent,
+            user_prompt,
+            session_id=session_id,
+            should_interrupt=should_interrupt,
+            enable_picture=enable_picture,
+            image_path=image_path,
+        )
 
-    def logic_stream(self, user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> Iterator[str]:
-        return stream_logic(self.logic_agent, user_prompt, session_id=session_id,enable_picture=enable_picture,image_path=image_path)
+    def logic_stream(
+        self,
+        user_prompt: str,
+        session_id: str = DEFAULT_SESSION_ID,
+        enable_picture: bool = False,
+        image_path: str = "",
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> Iterator[str]:
+        return stream_logic(
+            self.logic_agent,
+            user_prompt,
+            session_id=session_id,
+            should_interrupt=should_interrupt,
+            enable_picture=enable_picture,
+            image_path=image_path,
+        )
 
 
 def main() -> None:

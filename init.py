@@ -1,38 +1,46 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+from logic.patched_chat_openai import PatchedChatOpenAI
 from memory.memory_store import (
     DEFAULT_SESSION_ID,
     ensure_memory_layout,
     read_prompt_snapshot,
-    update_state,
 )
 from skill.chat_base_skill import CHAT_TOOLS
 from skill.chat_extra_skill import CHAT_EXTRA_TOOLS
 from skill.heart_base_skill import HEART_TOOLS
+from skill.heart_extra_skill import HEART_EXTRA_TOOLS
+from skill.sleep_base_skill import SLEEP_TOOLS
+from skill.sleep_extra_skill import SLEEP_EXTRA_TOOLS
 
 BASE_DIR = Path(__file__).resolve().parent
 MEMORY_DIR = BASE_DIR / "memory"
 MD_DIR = MEMORY_DIR / "md"
 CONGNITION_MD_DIR = BASE_DIR / "congnition" / "md"
 EMOTION_MD_DIR = BASE_DIR / "emotion" / "md"
+SLEEP_MD_DIR = BASE_DIR / "sleep" / "md"
 CONFIG_PATH = BASE_DIR / "config.json"
 CONTEXT_WINDOW_ROUNDS = 6
 
-TEXT_SECTIONS = [
+TEXT_SECTIONS: list[tuple[str, Path]] = [
     ("[系统信息]", MD_DIR / "AGENT.md"),
     ("[你的身份]", MD_DIR / "ROLE.md"),
     ("[你的关系网络]", MD_DIR / "RELATION.md"),
     ("[你的灵魂]", MD_DIR / "SOUL.md"),
 ]
-HEARTBEAT_SECTIONS = [
-    ("[心跳规则]", CONGNITION_MD_DIR / "HEARTBEATS.md"),
+HEART_SECTIONS: list[tuple[str, Path]] = [
+    ("[主观中断规则]", CONGNITION_MD_DIR / "INTERRUPTS.md"),
+]
+SLEEP_SECTIONS: list[tuple[str, Path]] = [
+    ("[睡眠整理规则]", SLEEP_MD_DIR / "SLEEP.md"),
 ]
 EMOTION_SECTIONS = [
     ("[情感润色规则]", EMOTION_MD_DIR / "EMOTION.md"),
@@ -42,6 +50,24 @@ DEFAULT_EMOTION_RULES = (
     "不要改变事实、结论、承诺和关键信息。\n"
     "只做语气、节奏、情绪温度和表达顺滑度的润色。\n"
     "输出必须是可以直接发给用户的最终回复，不要解释。"
+)
+IMAGE_RESOURCE_RULES = (
+    "[图片资源规则]:\n"
+    "如果用户消息或短期记忆里出现一个或多个 <image id=\"...\" />，说明当前会话里有可用图片资源。\n"
+    "如果同一条消息里有多张图，它们通常会以 [图片1] <image id=\"...\" />、[图片2] <image id=\"...\" /> 这样的顺序标签出现。\n"
+    "这个 <image id=\"...\" /> 是内部图片标记，不是给用户看的；正常回复时不要把这个标签原样展示给用户。\n"
+    "你不要凭空猜测图片内容；只有在回复确实依赖图像内容时，才调用视觉工具查看。\n"
+    "如果只需要看一张图，调用 inspect_image；如果需要结合、比较、排序、筛选多张图，调用 inspect_images。\n"
+    "如果当前回复不需要图像内容，就直接忽略这个标签，不要主动把图片内容编造成事实。\n"
+    "如果用户说“这张图”“刚才那张”“你发的那张”“上一张”这类指代，而最近对话里已经有 <image id=\"...\" />，默认优先理解为在指最近相关图片；若回答依赖图像内容，就直接调用 inspect_image 查看，不要先让用户重复发送。\n"
+    "如果用户说“第一张”“第二张”“最后一张”“前两张”“这几张”“所有图片”“对比一下”这类多图指代，默认优先考虑 inspect_images。"
+)
+TOOL_EXECUTION_RULES = (
+    "[工具执行规则]:\n"
+    "当用户要求你拍照、截图、发送图片、发送文件、查看图片内容时，必须先调用对应工具再回答。\n"
+    "当用户要求比较多张图片、综合多张图片、或根据多张图片作答时，必须先调用 inspect_images 再回答。\n"
+    "在工具真正成功之前，不要声称“已经发给你了”“我已经看到了”“我已经拍好了”。\n"
+    "如果工具失败，要明确告诉用户失败原因，而不是假装已经完成。"
 )
 
 with CONFIG_PATH.open("r", encoding="utf-8") as f:
@@ -88,17 +114,21 @@ def _base_system_parts(snapshot: dict[str, Any]) -> list[str]:
     return parts
 
 
-def _system_message(include_heartbeat: bool, snapshot: dict[str, Any] | None = None) -> dict[str, str]:
+def _system_message(
+    extra_sections: list[tuple[str, Path]] | None = None,
+    snapshot: dict[str, Any] | None = None,
+) -> dict[str, str]:
     ensure_memory_layout()
     memory_snapshot = snapshot or read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS)
     parts = _base_system_parts(memory_snapshot)
 
-    if include_heartbeat:
-        for title, path in HEARTBEAT_SECTIONS:
-            content = _read_text_section(path)
-            if content:
-                parts.append(f"{title}:\n{content}\n")
+    for title, path in extra_sections or []:
+        content = _read_text_section(path)
+        if content:
+            parts.append(f"{title}:\n{content}\n")
 
+    parts.append(IMAGE_RESOURCE_RULES)
+    parts.append(TOOL_EXECUTION_RULES)
     parts.append("[当前发言人]:秦滔")
     return {"role": "system", "content": "\n".join(parts)}
 
@@ -120,35 +150,49 @@ def _emotion_system_message(snapshot: dict[str, Any] | None = None) -> dict[str,
 
 
 def build_logic():
-    llm = ChatOpenAI(
+    llm = PatchedChatOpenAI(
         model=config["gpt_model"],
         api_key=config["gpt_api_key"],
         base_url=config["gpt_base_url"],
         temperature=0,
+        use_responses_api=False,
     )
     return create_react_agent(llm, tools=CHAT_TOOLS + CHAT_EXTRA_TOOLS)
 
 
 def build_heart():
-    llm = ChatOpenAI(
+    llm = PatchedChatOpenAI(
         model=config["heart_model"],
         api_key=config["heart_api_key"],
         base_url=config["heart_base_url"],
         temperature=0,
+        use_responses_api=False,
     )
-    return create_react_agent(llm, tools=HEART_TOOLS)
+    return create_react_agent(llm, tools=HEART_TOOLS + HEART_EXTRA_TOOLS)
+
+
+def build_sleep():
+    llm = PatchedChatOpenAI(
+        model=config.get("sleep_model", config["heart_model"]),
+        api_key=config.get("sleep_api_key", config["heart_api_key"]),
+        base_url=config.get("sleep_base_url", config["heart_base_url"]),
+        temperature=0,
+        use_responses_api=False,
+    )
+    return create_react_agent(llm, tools=SLEEP_TOOLS + SLEEP_EXTRA_TOOLS)
 
 
 def build_emotion():
-    llm = ChatOpenAI(
+    llm = PatchedChatOpenAI(
         model=config["emotion_model"],
         api_key=config["emotion_api_key"],
         base_url=config["emotion_base_url"],
         temperature=0.8,
+        use_responses_api=False,
     )
     return create_react_agent(llm, tools=[])
-import base64
-import mimetypes
+
+
 def image_to_data_url(image_path: Path | str) -> str:
     raw_path = str(image_path)
     if raw_path.startswith(("http://", "https://", "data:", "base64://")):
@@ -160,12 +204,18 @@ def image_to_data_url(image_path: Path | str) -> str:
     image_base64 = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{image_base64}"
 
-def build_input(user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_picture: bool = False,image_path: str = "") -> dict[str, list[dict[str, str]]]:
+
+def build_input(
+    user_prompt: str,
+    session_id: str = DEFAULT_SESSION_ID,
+    enable_picture: bool = False,
+    image_path: str = "",
+) -> dict[str, list[dict[str, str]]]:
     clean_prompt = normalize_user_prompt(user_prompt)
     snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS, session_id=session_id)
-    messages = [_system_message(include_heartbeat=False, snapshot=snapshot)]
+    messages = [_system_message(snapshot=snapshot)]
     messages.extend(snapshot["recent_messages"])
-    
+
     if enable_picture:
         messages.append(
             {
@@ -188,7 +238,22 @@ def build_input(user_prompt: str, session_id: str = DEFAULT_SESSION_ID,enable_pi
 
 def build_heart_input(user_prompt: str) -> dict[str, list[dict[str, str]]]:
     snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS)
-    return {"messages": [_system_message(include_heartbeat=True, snapshot=snapshot), {"role": "user", "content": user_prompt}]}
+    return {
+        "messages": [
+            _system_message(extra_sections=HEART_SECTIONS, snapshot=snapshot),
+            {"role": "user", "content": user_prompt},
+        ]
+    }
+
+
+def build_sleep_input(user_prompt: str) -> dict[str, list[dict[str, str]]]:
+    snapshot = read_prompt_snapshot(max_rounds=CONTEXT_WINDOW_ROUNDS)
+    return {
+        "messages": [
+            _system_message(extra_sections=SLEEP_SECTIONS, snapshot=snapshot),
+            {"role": "user", "content": user_prompt},
+        ]
+    }
 
 
 def build_emotion_input(
@@ -329,12 +394,23 @@ def run_heart(
     show_output: bool = False,
     should_interrupt: Callable[[], bool] | None = None,
 ) -> str:
-    try:
-        return _stream_agent_response(
-            agent,
-            build_heart_input(user_prompt),
-            show_output=show_output,
-            should_interrupt=should_interrupt,
-        )
-    finally:
-        update_state({"play": {"active": False}})
+    return _stream_agent_response(
+        agent,
+        build_heart_input(user_prompt),
+        show_output=show_output,
+        should_interrupt=should_interrupt,
+    )
+
+
+def run_sleep(
+    agent,
+    user_prompt: str,
+    show_output: bool = False,
+    should_interrupt: Callable[[], bool] | None = None,
+) -> str:
+    return _stream_agent_response(
+        agent,
+        build_sleep_input(user_prompt),
+        show_output=show_output,
+        should_interrupt=should_interrupt,
+    )

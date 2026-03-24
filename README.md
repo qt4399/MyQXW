@@ -3,16 +3,16 @@
 
 ## 项目介绍
 
-这是一个面向长期陪伴与持续运行场景的本地 Agent 项目。它不只是一次性回答问题的聊天程序，而是一个带有**短期上下文**、**日记忆整理**、**月度归档**、**持续心跳**和**低概率玩耍/探索**机制的常驻智能体。
+这是一个面向长期陪伴与持续运行场景的本地 Agent 项目。它不只是一次性回答问题的聊天程序，而是一个带有**短期上下文**、**后台记忆整理**、**月度归档**、**主观中断**和**显式学习计划**的常驻智能体。
 
 它的目标不是让 Agent 每次都从零开始，而是让它在长期运行中逐步形成稳定的记忆分层与行为边界：
 
 - 普通对话时，短期记忆仍保存最近 20 轮，但默认只向模型注入最近 6 轮对话，再结合 `day.md` 和最近 30 天概括理解上下文。
-- 空闲心跳时，主动整理溢出的旧对话，把值得保留的信息沉淀到 `day.md`。
-- 每天凌晨 4:00 后，自动把昨天的 `day.md` 归档进 `month.md`，形成最近 30 天可检索的记录。
-- 当需要查看某一天的细节时，通过工具按日期读取，而不是把整个月详细内容都塞进 prompt。
+- 溢出的旧对话不会直接交给 `heart`，而是由独立的 `sleep` 服务在后台慢慢整理。
+- 每天凌晨 4:00 后，程序会自动把昨天的 `day.md` 归档进 `month.md`，形成最近 30 天可检索的记录。
+- 外部学习任务不走神经元脉冲，而是由 `learn/learn_tasks.yaml` 显式控制开关与时间间隔。
 
-整个项目遵循“**程序负责结构与边界，Agent 负责语义整理与轻量决策**”的思路：程序保证记忆文件、时间规则和归档流程稳定可靠；Agent 负责理解内容、提炼主题、维护 day 记忆，并在少数时刻进行低风险探索。
+整个项目遵循“**程序负责结构与边界，Agent 负责语义整理与轻量决策**”的思路：程序保证记忆文件、时间规则、归档流程和调度边界稳定可靠；Agent 负责理解内容、提炼主题、维护 day 记忆，并在少数时刻进行主观响应。
 
 ## 使用方式
 
@@ -30,10 +30,34 @@ cd MyQXW
 pip install -r requirements.txt
 ```
 
+如果你需要启用额外能力，还需要补充这些环境项：
+
+- `Playwright` 浏览器自动化：
+
+  ```bash
+  playwright install chromium
+  ```
+
+- `pdf2image` 依赖的系统工具（Ubuntu / Debian）：
+
+  ```bash
+  sudo apt-get install -y poppler-utils
+  ```
+
 接着检查并填写模型配置文件：
 
 - `config.json`
 - 需要确认其中的模型名称、`base_url` 和 `api_key` 可正常使用
+- 其中当前代码实际会读取：
+  - `gpt_model` / `gpt_base_url` / `gpt_api_key`
+  - `heart_model` / `heart_base_url` / `heart_api_key`
+  - `emotion_model` / `emotion_base_url` / `emotion_api_key`
+  - `word_model` / `word_base_url` / `word_api_key`
+
+如果你要接入 QQ / NapCat，还需要检查：
+
+- `qq_api_reference/local_config.json`
+- 需要确认其中的 WebSocket 地址和 token 可正常使用
 
 ### 2. 启动统一调度器
 
@@ -44,36 +68,56 @@ cd MyQXW
 python main.py
 ```
 
-启动后会发生两件事：
+启动后会发生这些事：
 
-- 终端前台进入聊天模式，实时打印主对话输出。
-- `heartbeat` 在后台静默运行，不再往终端刷屏。
+- 后台启动 `heart` / `sleep` / `learn` / `scheduler` 四个服务。
+- 启动 OpenAI-compatible API：`http://127.0.0.1:8000/v1/chat/completions`
+- 尝试启动 QQBridge（如果 NapCat 配置不可用，会打印失败信息）
 
-### 3. 查看 heartbeat 日志
+注意：
 
-后台 heartbeat 会把每次运行的时间、状态、触发原因、最终回复和错误信息写到：
+- 当前 `main.py` 不提供本地终端聊天 REPL。
+- 它更像一个服务进程，聊天入口主要是 OpenAI-compatible API 和 QQBridge。
 
-- `logs/heartbeat_log.yaml`
+### 3. 本地调试对话接口
 
-这个日志文件最多保留最近 100 条心跳记录。
+仓库里带了一个简单的本地命令行客户端：
+
+```bash
+cd MyQXW
+python demo/openai_request.py
+```
+
+这个脚本会通过 `transport/openai_api.py` 暴露的兼容接口发起对话，适合快速本地联调。
+
+### 4. 查看后台日志
+
+后台服务会分别把最近活动写到这些日志文件：
+
+- `logs/heart_log.yaml`
+- `logs/sleep_log.yaml`
+- `logs/learn_log.yaml`
+
+每个日志文件最多保留最近 100 条记录。
+
+更细的字段说明见 `LOGS.md`。
 
 如果你想在另一个终端实时观察，可以直接查看这个文件：
 
 ```bash
 cd MyQXW
-cat logs/heartbeat_log.yaml
+cat logs/heart_log.yaml
 ```
 
-### 4. 单独调试 heartbeat
+### 5. 可选：QQ / NapCat 接入
 
-如果你想暂时脱离调度器，单独前台观察 heartbeat，也可以运行：
+当前仓库没有单独的 REPL 调试入口；后台服务由 `main.py` 统一拉起。
 
-```bash
-cd MyQXW
-python -u heart.py
-```
+如果你要通过 QQ 收发消息：
 
-这个模式主要用于调试；日常使用更推荐统一调度器。`heart.py` 会提示自己处于调试模式。
+- 先确保 NapCat 正常运行
+- 再检查 `qq_api_reference/local_config.json`
+- 然后启动 `python main.py`
 
 ## 整体架构图
 
@@ -86,45 +130,32 @@ python -u heart.py
        │ 输入消息
        v
 ┌────────────────────┐
-│ logic/chat_service │
-│ / main.py 统一入口 │
+│ transport / main   │
+│ API / QQ / 统一启动 │
 └─────────┬──────────┘
           │
-          ├──────────────────────────┬──────────────────────────┐
-          │                          │                          │
-          v                          v                          v
+          ├──────────────→ `language/chat_service.py`
+          ├──────────────→ `congnition/heart_service.py`
+          ├──────────────→ `sleep/sleep_service.py`
+          ├──────────────→ `learn/learn_service.py`
+          └──────────────→ `scheduler/scheduler_service.py`
+
 ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│ 前台对话区          │    │ 后台心跳区          │    │   日志文件          │
-│ - chat model       │    │ - heart model      │    │ logs/heartbeat_    │
-│ - 终端实时打印      │    │ - 静默整理记忆      │    │ log.yaml           │
+│ init.py            │    │ memory_store.py    │    │ logs/*.yaml        │
+│ 模型 / prompt / 工具 │    │ 共享记忆存储与锁    │    │ heart/sleep/learn  │
 └─────────┬──────────┘    └─────────┬──────────┘    └────────────────────┘
-          │                         │
-          v                         v
-┌────────────────────┐    ┌────────────────────┐
-│ init.py            │    │ memory_store.py    │
-│ prompt / tool 装配  │    │ 共享记忆存储与锁    │
-└─────────┬──────────┘    └─────────┬──────────┘
           │                         │
           └──────────────┬──────────┘
                          v
               ┌────────────────────┐
-              │ memory / logs       │
-              │ yaml + md + log     │
+              │ memory / workspace  │
+              │ yaml + md + 文献库   │
               └────────────────────┘
 ```
 
 ### 2. 运行时数据流
 
 ```text
-┌────────────────────┐
-│ 统一调度器主循环    │
-└─────────┬──────────┘
-          │
-          ├──────────────→ 前台等待用户输入
-          │
-          └──────────────→ 后台定时检查 heartbeat
-
-
 ┌────────────────────┐
 │ 用户发送消息        │
 └─────────┬──────────┘
@@ -153,39 +184,31 @@ python -u heart.py
           │
           └──────────────→ 超出窗口部分进入 `temp_communicate.yaml`
 
-
 ┌────────────────────┐
-│ 后台 heartbeat      │
+│ scheduler 周期轮询  │
 └─────────┬──────────┘
           │
-          v
-┌─────────────────────────────────────┐
-│ memory_store.py 准备心跳状态         │
-│ - 当前具体时间                      │
-│ - 当前记忆日                        │
-│ - 是否跨过凌晨 4:00                 │
-│ - 是否归档 day.md → month.md        │
-│ - temp 是否值得整理                 │
-│ - 是否触发 play                     │
-└─────────┬───────────────────────────┘
-          │
+          ├──────────────→ 归档检查：`archive_day_to_month()`
+          ├──────────────→ 神经元评估：`temp_overflow_pressure`
+          ├──────────────→ 神经元评估：`day_closure_pressure`
+          └──────────────→ 神经元评估：`subjective_pulse`
+
+┌────────────────────┐    ┌────────────────────┐
+│ sleep 任务队列      │    │ heart 中断队列      │
+└─────────┬──────────┘    └─────────┬──────────┘
+          │                         │
+          ├──────────────→ `temp_digest`
+          ├──────────────→ `daily_summary`
+          │                         └──────────────→ `interrupt`
           v
 ┌────────────────────┐
-│ 中文心跳提示        │
+│ learn 固定周期任务  │
 └─────────┬──────────┘
           │
-          v
-┌────────────────────┐
-│ heart model 决策    │
-└─────────┬──────────┘
-          │
-          ├──────────────→ `HEARTBEAT_OK`
-          ├──────────────→ 整理 `temp_communicate.yaml` 到 `day.md`
-          ├──────────────→ 更新 `day.md` 概括 / 详细
-          └──────────────→ 把 prompt / 回复 / 时间写入 heartbeat 日志
+          └──────────────→ `literature_poll`
 
 
-备注：chat 和 heartbeat 会并行调用各自的模型；共享的 memory 文件由 `memory_store.py` 串行保护，避免读写冲突。
+备注：chat / heart / sleep / learn 会并行工作；共享的 memory 文件由 `memory_store.py` 串行保护，避免读写冲突。
 ```
 
 ### 3. 记忆层级视角
@@ -201,9 +224,9 @@ python -u heart.py
 ┌────────────────────┐
 │ 待整理缓冲层        │
 │ temp_communicate    │
-│ 等待心跳整理        │
+│ 等待 sleep 整理     │
 └─────────┬──────────┘
-          │ 心跳提炼
+          │ 神经元触发
           v
 ┌────────────────────┐
 │ 当天记忆层          │
@@ -220,55 +243,70 @@ python -u heart.py
 └────────────────────┘
 ```
 
-这个项目是一个带**持续心跳**、**短期对话窗口**、**日记忆**、**月归档**和**低概率玩耍**机制的本地 Agent。
+这个项目现在按“脑区服务”拆成了五层：`chat`、`heart`、`sleep`、`learn`、`scheduler`。
 
 ## 目录结构
 
-- `main.py`：统一启动入口，默认启动 chat、后台 heart、OpenAI API 和 QQBridge
-- `logic/chat_service.py`：聊天服务实现，负责 chat agent 的创建与调用
-- `congnition/heart_service.py`：意识区服务实现，负责后台 heartbeat 和日志落盘
-- `heart.py`：单独调试 heartbeat 的前台入口
+- `main.py`：统一启动入口，启动 chat、heart、sleep、learn、scheduler、OpenAI API 和 QQBridge
+- `language/chat_service.py`：聊天服务实现，负责 logic + emotion + 记忆回写
+- `congnition/heart_service.py`：主观认知区服务，只接收和处理主观中断
+- `sleep/sleep_service.py`：后台记忆整理服务，负责 temp 对话整理与每日概括
+- `learn/learn_service.py`：外部学习服务，按显式配置定期执行文献/资料任务
+- `scheduler/scheduler_service.py`：神经元调度器，负责内部脉冲与任务投递
 - `init.py`：组装模型、系统提示、工具和输入上下文
-- `memory/memory_store.py`：记忆读写、日/月归档、心跳状态准备
-- `skills/chat_skills.py`：前台对话区工具
-- `skills/heart_skills.py`：后台心跳区工具
+- `memory/memory_store.py`：记忆读写、日/月归档和共享状态维护
+- `memory/image_store.py`：图片引用存储与 `<image id=\"...\" />` 标签管理
+- `transport/openai_api.py`：OpenAI-compatible Chat Completions 接口
+- `transport/qq_bridge.py`：QQ / NapCat 消息桥接
+- `skill/chat_base_skill.py` + `skill/chat_extra_skill.py`：前台对话区工具
+- `skill/heart_base_skill.py` + `skill/heart_extra_skill.py`：主观认知区工具
+- `skill/sleep_base_skill.py` + `skill/sleep_extra_skill.py`：睡眠整理区工具
+- `demo/openai_request.py`：本地调试 OpenAI-compatible API 的简单客户端
+- `workspace/literature/`：文献巡检的状态、索引与分类存储
 - `memory/md/`：自然语言记忆与规则文档
 - `memory/yaml/`：结构化状态与短期对话数据
-- `logs/heartbeat_log.yaml`：最近 100 条 heartbeat 日志，包含 `time` / `status` / `reasons` / `response` / `error`
+- `logs/heart_log.yaml` / `logs/sleep_log.yaml` / `logs/learn_log.yaml`：后台服务日志
 
 ## 整体工作流
 
 ### 1. 普通对话
 
-用户消息进入 `main.py` 后，会走 `init.py` 里的普通对话链路：
+用户消息通常通过 `transport/openai_api.py` 或 `transport/qq_bridge.py` 进入，然后交给 `language/chat_service.py`，再走 `init.py` 里的普通对话链路：
 
 1. 注入基础人格与规则文档
 2. 从 `communicate.yaml` 中截取最近 6 轮对话上下文
 3. 注入 `day.md`
 4. 注入最近 30 天概括
 5. 调用模型生成回复
-6. 把这一轮用户/助手对话写入 `communicate.yaml`
-7. 如果超过 20 轮，最旧对话会溢出到 `temp_communicate.yaml`
+6. 把 logic 草稿交给 emotion 层做语气润色
+7. 把这一轮用户/助手对话写入 `communicate.yaml`
+8. 如果超过 20 轮，最旧对话会溢出到 `temp_communicate.yaml`
 
-### 2. 心跳
+### 2. 主观中断
 
-`heart.py` 调试模式下会每秒发送一次 `Boom`；统一调度器中的后台 heartbeat 则采用自适应节流：空闲时约 30 秒一次，temp 有积压时约 10 秒一次，达到整理条件时约 5 秒一次。它和前台主对话会并行工作，各自调用不同的模型。
+`congnition/heart_service.py` 不再做后台整理调度，而是一个中断处理器。它接收来自 `scheduler` 的主观脉冲，再由 heart 区模型决定是否做一次轻量响应或状态更新。
 
-每次心跳前，系统会先：
+### 3. 睡眠整理
 
-1. 准备当前心跳状态
-2. 判断当前记忆日
-3. 检查是否需要把旧的 `day.md` 归档进 `month.md`
-4. 检查 `temp_communicate.yaml` 是否值得整理
-5. 低概率触发一次 `play`
-6. 把这些状态用中文拼进心跳提示，再发送给 Agent
+`sleep/sleep_service.py` 负责后台无意识整理，主要处理：
 
-heart 区模型再根据本次状态决定：
+- `temp_communicate.yaml` 的溢出对话整理
+- `day.md` 的概括更新
+- 日记忆向月归档前的收束
 
-- 直接回复 `HEARTBEAT_OK`
-- 整理 `temp_communicate.yaml` 到 `day.md`
-- 更新 `day.md` 的概括或详细内容
-- 在允许时进行一次低风险玩耍/探索
+这些任务不再由 `heart` 主动轮询，而是由 `scheduler` 的 homeostatic neurons 触发。
+
+### 4. 外部学习
+
+`learn/learn_service.py` 负责文献巡检、资料阅读和后续资料库更新。它不走神经元脉冲，而是由你显式配置开关和固定间隔，例如 `learn/learn_tasks.yaml` 里的 `literature_poll` 任务。
+
+### 5. 神经元调度
+
+`scheduler/scheduler_service.py` 只负责内部脉冲，不直接做语义整理。当前默认神经元包括：
+
+- `temp_overflow_pressure`：推动 `sleep.temp_digest`
+- `day_closure_pressure`：推动 `sleep.daily_summary`
+- `subjective_pulse`：推动 `heart.interrupt`
 
 ## 记忆分层
 
@@ -280,7 +318,7 @@ heart 区模型再根据本次状态决定：
 
 - `memory/yaml/temp_communicate.yaml`
   - 保存从 `communicate.yaml` 溢出的旧对话
-  - 等待心跳中的 Agent 进行主题整理
+  - 等待 `sleep` 服务进行主题整理
 
 ### 当天层
 
@@ -289,7 +327,7 @@ heart 区模型再根据本次状态决定：
   - 结构分为：
     - `## 概括`
     - `## 详细`
-  - 由 Agent 在心跳中逐步整理
+  - 由 `sleep` 服务逐步整理
 
 ### 月归档层
 
@@ -308,13 +346,12 @@ heart 区模型再根据本次状态决定：
     - 当前记忆日
     - 最近一次用户消息时间
     - 最近一次助手消息时间
-    - 最近一次心跳时间
-    - 最近一次日归档时间
-    - 最近一次临时对话整理提醒时间
-    - 最近一次临时对话整理完成时间
-    - `play` 的启用状态、激活状态和触发时间
+  - 最近一次主观中断处理时间
+  - 最近一次日归档时间
+  - 最近一次临时对话整理完成时间
+  - `play` 的启用状态、激活状态和触发时间
 
-  说明：运行中的聊天/心跳服务不再持久化到 `state.yaml`，而是分别由 `logic/chat_service.py` 与 `congnition/heart_service.py` 在内存里运行。
+  说明：运行中的聊天 / heart / sleep / learn / scheduler 服务不直接把内部线程状态落到 `state.yaml`，这里只保存跨服务需要共享的记忆状态与时间戳。
 
 ## 记忆日规则
 
@@ -337,23 +374,41 @@ heart 区模型再根据本次状态决定：
 - `day.md`
 - 最近 30 天概括
 
-### 心跳默认注入
+### 主观中断默认注入
 
 - 基础人格与规则文档
 - `day.md`
 - 最近 30 天概括
-- `HEARTBEATS.md`
-- 本次心跳状态（中文）
+- `INTERRUPTS.md`
+- 本次中断包（中文）
+
+### 睡眠整理默认注入
+
+- 基础人格与规则文档
+- `day.md`
+- 最近 30 天概括
+- `SLEEP.md`
+- 本次睡眠任务描述（中文）
 
 ## Tool 设计
 
-当前实现把工具按“脑区”拆成两组：
+当前实现把工具按“脑区”拆成三组：
 
-- 对话区 `skills/chat_skills.py`
+- 对话区 `skill/chat_base_skill.py` + `skill/chat_extra_skill.py`
   - `run_command`
   - `read_month_day`
+  - `obtain_photo`
+  - `inspect_image`
+  - `inspect_images`
+  - `send_picture_qq`
 
-- 心跳区 `skills/heart_skills.py`
+- 主观认知区 `skill/heart_base_skill.py` + `skill/heart_extra_skill.py`
+  - `run_command`
+  - `read_state`
+  - `update_state`
+  - `read_month_day`
+
+- 睡眠整理区 `skill/sleep_base_skill.py` + `skill/sleep_extra_skill.py`
   - `run_command`
   - `read_state`
   - `update_state`
@@ -366,36 +421,26 @@ heart 区模型再根据本次状态决定：
 其中：
 
 - 最近 30 天概括是**默认注入**的，不需要额外工具读取
-- `day.md` / `temp_communicate.yaml` / `state.yaml` 的维护能力只开放给心跳区
+- `day.md` / `temp_communicate.yaml` 的维护能力只开放给睡眠整理区
+- `state.yaml` 的轻量更新能力开放给 heart 与 sleep
 - 对话区默认不直接操作日记忆整理流程
-
-## 玩耍机制
-
-`play` 不是固定任务，而是一个低概率事件。
-
-- 每次心跳前都会计算一次是否触发 `play`
-- 当前平均触发间隔由 `state.yaml` 中的 `play.mean_interval_seconds` 控制
-- 命中后会把 `play.active` 设为 `true`
-- 本次心跳结束后会恢复为 `false`
-
-这意味着：
-
-- Agent 一直都在“呼吸”
-- 但只有极少数心跳会允许它进入探索/玩耍状态
+- 浏览器类工具默认走 Chrome 引擎，并按会话复用独立浏览器 session
 
 ## 当前实现边界
 
 当前架构里：
 
 - 对话到 `communicate.yaml` / `temp_communicate.yaml` 的转移是程序自动做的
-- `day.md` 的整理主要由 heart 区模型在心跳中完成
-- `month.md` 的归档是程序在凌晨 4:00 后自动完成的
+- `day.md` 的整理主要由 sleep 区模型在后台任务中完成
+- `month.md` 的归档由程序在凌晨 4:00 后自动完成，`scheduler` 会持续维护这个边界
 - `month.md` 的“某一天详细内容检索”通过工具完成
-- chat 和 heartbeat 会并行工作，但共享存储由 `memory_store.py` 统一加锁保护
+- learn 的文献巡检由显式配置控制，不走神经元脉冲
+- scheduler 只负责内部脉冲，不直接做语义整理
+- chat / heart / sleep / learn 会并行工作，但共享存储由 `memory_store.py` 统一加锁保护
 
 因此这是一个：
 
 - 程序负责结构与边界
-- Agent 负责语义整理与轻量探索
+- Agent 负责语义整理与主观响应
 
 的混合架构。

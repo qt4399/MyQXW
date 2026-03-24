@@ -1,0 +1,41 @@
+version: 1
+poll_seconds: 1.0
+neurons:
+  - id: temp_overflow_pressure
+    enabled: true
+    target_service: sleep
+    runner: temp_digest
+    cooldown_seconds: 300
+    decay: 0.94
+    gain: 0.25
+    base_probability: 0.0
+    probability_gain: 0.18
+    max_probability: 0.75
+    max_accumulator: 3.0
+    post_fire_accumulator: 0.2
+
+  - id: day_closure_pressure
+    enabled: true
+    target_service: sleep
+    runner: daily_summary
+    cooldown_seconds: 1800
+    decay: 0.97
+    gain: 0.12
+    base_probability: 0.0
+    probability_gain: 0.12
+    max_probability: 0.45
+    max_accumulator: 2.0
+    post_fire_accumulator: 0.15
+
+  - id: subjective_pulse
+    enabled: true
+    target_service: heart
+    runner: interrupt
+    cooldown_seconds: 120
+    decay: 0.95
+    gain: 0.08
+    base_probability: 0.01
+    probability_gain: 0.08
+    max_probability: 0.20
+    max_accumulator: 1.5
+    post_fire_accumulator: 0.05

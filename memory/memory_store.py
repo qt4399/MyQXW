@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
 import os
-import random
 import re
 import tempfile
 import threading
@@ -29,9 +27,6 @@ STORAGE_LOCK = threading.RLock()
 
 COMMUNICATE_WINDOW = 20
 DAY_ROLLOVER_HOUR = 4
-TEMP_DIGEST_MIN_ROUNDS = 4
-TEMP_DIGEST_MIN_AGE_SECONDS = 10 * 60
-TEMP_DIGEST_COOLDOWN_SECONDS = 10 * 60
 DEFAULT_PLAY_MEAN_INTERVAL_SECONDS = 3600
 MONTH_WINDOW_DAYS = 30
 
@@ -455,27 +450,24 @@ def read_prompt_snapshot(max_rounds: int | None = None, session_id: str | None =
         }
 
 
-def delete_temp_rounds(ids: list[str]) -> dict[str, Any]:
+def delete_temp_rounds(ids: list[str], session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        temp = read_temp_communicate()
+        session_key = normalize_session_id(session_id)
+        temp = read_temp_communicate(session_id=session_key)
         original_rounds = list(temp.get("rounds", []))
         id_set = {item.strip() for item in ids if item.strip()}
         temp["rounds"] = [item for item in original_rounds if str(item.get("id", "")) not in id_set]
 
-        updated = write_temp_communicate(temp)
+        updated = write_temp_communicate(temp, session_id=session_key)
         if len(updated.get("rounds", [])) < len(original_rounds):
             update_state({"last_temp_digest_completed_at": now_iso()})
 
         return updated
 
 
-def note_temp_digest_prompted(prompted_at: str | None = None) -> dict[str, Any]:
-    return update_state({"last_temp_digest_prompted_at": prompted_at or now_iso()})
-
-
-def temp_stats() -> dict[str, Any]:
+def temp_stats(session_id: str | None = None) -> dict[str, Any]:
     with STORAGE_LOCK:
-        rounds = list(read_temp_communicate().get("rounds", []))
+        rounds = list(read_temp_communicate(session_id=session_id).get("rounds", []))
         oldest_age = None
         if rounds:
             oldest = min(rounds, key=lambda item: item.get("moved_at") or item.get("created_at") or "")
@@ -484,6 +476,34 @@ def temp_stats() -> dict[str, Any]:
             "count": len(rounds),
             "oldest_age_seconds": int(oldest_age) if oldest_age is not None else None,
         }
+
+
+def list_temp_session_stats() -> list[dict[str, Any]]:
+    with STORAGE_LOCK:
+        root = _normalize_temp_root(_read_yaml(TEMP_COMMUNICATE_PATH, _default_temp_communicate()))
+        results: list[dict[str, Any]] = []
+        for session_key, session_data in root.get("sessions", {}).items():
+            rounds = _normalize_round_items(session_data.get("rounds", []))
+            oldest_age = None
+            if rounds:
+                oldest = min(rounds, key=lambda item: item.get("moved_at") or item.get("created_at") or "")
+                oldest_age = seconds_since(oldest.get("moved_at") or oldest.get("created_at"))
+            results.append(
+                {
+                    "session_id": str(session_key).strip(),
+                    "count": len(rounds),
+                    "oldest_age_seconds": int(oldest_age) if oldest_age is not None else None,
+                }
+            )
+        results.sort(
+            key=lambda item: (
+                int(item.get("count", 0) or 0),
+                int(item.get("oldest_age_seconds", 0) or 0),
+                str(item.get("session_id", "")),
+            ),
+            reverse=True,
+        )
+        return results
 
 
 def read_day_md() -> str:
@@ -658,67 +678,3 @@ def archive_day_to_month(now: datetime | None = None) -> bool:
         )
         return True
 
-
-def _temp_digest_due(state: dict[str, Any], stats: dict[str, Any], now: datetime) -> bool:
-    if stats["count"] < TEMP_DIGEST_MIN_ROUNDS:
-        return False
-    if (stats["oldest_age_seconds"] or 0) < TEMP_DIGEST_MIN_AGE_SECONDS:
-        return False
-    last_prompted_age = seconds_since(state.get("last_temp_digest_prompted_at"), now)
-    return last_prompted_age is None or last_prompted_age >= TEMP_DIGEST_COOLDOWN_SECONDS
-
-
-def _play_should_trigger(state: dict[str, Any], now: datetime) -> bool:
-    play = state.get("play", {}) if isinstance(state.get("play"), dict) else {}
-    if not bool(play.get("enabled", True)):
-        return False
-
-    mean_interval = max(60, int(play.get("mean_interval_seconds", DEFAULT_PLAY_MEAN_INTERVAL_SECONDS)))
-    elapsed = seconds_since(state.get("last_heartbeat_at"), now)
-    elapsed_seconds = max(1.0, elapsed if elapsed is not None else 1.0)
-    probability = 1 - math.exp(-elapsed_seconds / mean_interval)
-    return random.random() < probability
-
-
-def prepare_heartbeat_state(commit_digest_prompted: bool = True) -> dict[str, Any]:
-    with STORAGE_LOCK:
-        ensure_memory_layout()
-        current = now_dt()
-        current_time = current.isoformat(timespec="seconds")
-        current_day = active_memory_day(current)
-        rolled_day = archive_day_to_month(current)
-        state = read_state()
-        stats = temp_stats()
-
-        reasons: list[str] = []
-        digest_due = _temp_digest_due(state, stats, current)
-        if digest_due:
-            reasons.append("临时对话整理")
-
-        play_triggered = _play_should_trigger(state, current)
-        if play_triggered:
-            reasons.append("玩耍")
-
-        play_patch = dict(state.get("play", {}))
-        play_patch["active"] = play_triggered
-        if play_triggered:
-            play_patch["last_triggered_at"] = current_time
-
-        patch: dict[str, Any] = {
-            "current_day": current_day,
-            "last_heartbeat_at": current_time,
-            "play": play_patch,
-        }
-        if digest_due and commit_digest_prompted:
-            patch["last_temp_digest_prompted_at"] = current_time
-        state = update_state(patch)
-
-        return {
-            "current_time": current_time,
-            "current_day": state.get("current_day"),
-            "rolled_day": rolled_day,
-            "temp_round_count": stats["count"],
-            "temp_oldest_age_seconds": stats["oldest_age_seconds"],
-            "play_triggered": play_triggered,
-            "reasons": reasons,
-        }

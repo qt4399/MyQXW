@@ -1,62 +1,57 @@
 from __future__ import annotations
 
+import queue
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from init import build_heart, run_heart
-from memory.memory_store import ensure_memory_layout, note_temp_digest_prompted, now_iso, prepare_heartbeat_state
+from memory.memory_store import ensure_memory_layout, now_iso, update_state
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
-HEARTBEAT_LOG_PATH = LOG_DIR / "heartbeat_log.yaml"
-HEARTBEAT_LOOP_POLL_SECONDS = 0.5
-HEARTBEAT_IDLE_INTERVAL_SECONDS = 30.0
-HEARTBEAT_TEMP_PENDING_INTERVAL_SECONDS = 10.0
-HEARTBEAT_DIGEST_DUE_INTERVAL_SECONDS = 5.0
-HEARTBEAT_LOG_MAX_ENTRIES = 100
+HEART_LOG_PATH = LOG_DIR / "heart_log.yaml"
+HEART_LOG_MAX_ENTRIES = 100
 
 
-def build_heartbeat_prompt(state: dict[str, Any]) -> str:
-    reasons = state.get("reasons", [])
-    reason_text = "、".join(reasons) if reasons else "无"
-    play_text = "是" if state.get("play_triggered") else "否"
-    rolled_text = "是" if state.get("rolled_day") else "否"
-    oldest_text = state.get("temp_oldest_age_seconds")
-    oldest_value = str(oldest_text) if oldest_text is not None else "无"
-    digest_due = "临时对话整理" in reasons
+def build_interrupt_prompt(task: dict[str, Any]) -> str:
+    runner = str(task.get("runner", "")).strip() or "interrupt"
+    source = str(task.get("source", "")).strip() or "unknown"
+    impulse = float(task.get("impulse", 0.0) or 0.0)
+    payload = task.get("payload", {}) if isinstance(task.get("payload"), dict) else {}
 
     lines = [
-        "Boom",
-        "",
-        "[本次心跳状态]",
-        f"- 当前具体时间：{state.get('current_time')}",
-        f"- 当前记忆日：{state.get('current_day')}",
-        f"- 本次是否触发玩耍：{play_text}",
-        f"- 本次是否发生归档：{rolled_text}",
-        f"- 临时对话轮数：{state.get('temp_round_count')}",
-        f"- 最旧临时对话等待秒数：{oldest_value}",
-        f"- 本次关注原因：{reason_text}",
-        "",
+        "[本次主观中断]",
+        f"- runner: {runner}",
+        f"- source: {source}",
+        f"- impulse: {impulse:.3f}",
+        f"- current_time: {task.get('time') or now_iso()}",
     ]
 
-    if state.get("play_triggered"):
-        lines.append("如果本次触发了玩耍，可以进行一次低风险探索。")
+    if payload:
+        lines.append("- payload:")
+        for key, value in payload.items():
+            lines.append(f"  - {key}: {value}")
 
-    if digest_due:
-        lines.append("本次已经满足临时对话整理条件；你现在可以读取 temp_communicate，整理成熟主题到 day.md，并删除已处理对话。")
-    else:
-        lines.append("如果本次关注原因里没有“临时对话整理”，不要主动读取 temp_communicate，也不要因为一两句零散内容就写入 day.md。")
-
-    lines.append("如果没有足够价值，直接回复 HEARTBEAT_OK。")
+    lines.extend(
+        [
+            "",
+            "这是一次主观中断，而不是后台整理或学习任务。",
+            "你可以做一次简短的主观响应或轻量状态更新。",
+            "如果没有必要动作，直接回复 HEART_OK。",
+        ]
+    )
     return "\n".join(lines)
 
 
-class HeartbeatLogStore:
-    def __init__(self, path: Path, max_entries: int = HEARTBEAT_LOG_MAX_ENTRIES) -> None:
+# Backward-compatible alias for older imports.
+build_heartbeat_prompt = build_interrupt_prompt
+
+
+class HeartLogStore:
+    def __init__(self, path: Path, max_entries: int = HEART_LOG_MAX_ENTRIES) -> None:
         self.path = path
         self.max_entries = max_entries
         self._lock = threading.Lock()
@@ -81,8 +76,9 @@ class HeartbeatLogStore:
             normalized.append(
                 {
                     "time": item.get("time"),
+                    "runner": item.get("runner", "") or "",
+                    "source": item.get("source", "") or "",
                     "status": item.get("status", "ok") or "ok",
-                    "reasons": list(item.get("reasons", []) or []),
                     "response": item.get("response", "") or "",
                     "error": item.get("error", "") or "",
                 }
@@ -106,8 +102,9 @@ class HeartbeatLogStore:
             self._entries.append(
                 {
                     "time": entry.get("time"),
+                    "runner": entry.get("runner", "") or "",
+                    "source": entry.get("source", "") or "",
                     "status": entry.get("status", "ok") or "ok",
-                    "reasons": list(entry.get("reasons", []) or []),
                     "response": entry.get("response", "") or "",
                     "error": entry.get("error", "") or "",
                 }
@@ -120,13 +117,12 @@ class HeartService:
     def __init__(self) -> None:
         ensure_memory_layout()
         self.heart_agent = build_heart()
-        self.stop_event = threading.Event()
-        self.control_lock = threading.Lock()
-        self.next_heartbeat_at = time.monotonic()
-        self.heartbeat_logs = HeartbeatLogStore(HEARTBEAT_LOG_PATH)
-        self.heartbeat_thread = threading.Thread(
-            target=self._heartbeat_loop,
-            name="heartbeat-worker",
+        self.heart_logs = HeartLogStore(HEART_LOG_PATH)
+        self._queue: queue.Queue[dict[str, Any]] = queue.Queue()
+        self._stop_event = threading.Event()
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            name="heart-worker",
             daemon=True,
         )
         self._started = False
@@ -134,71 +130,61 @@ class HeartService:
     def start(self) -> None:
         if self._started:
             return
-        self.heartbeat_thread.start()
+        self._worker.start()
         self._started = True
 
     def stop(self) -> None:
         if not self._started:
             return
-        self.stop_event.set()
-        self.heartbeat_thread.join(timeout=5)
+        self._stop_event.set()
+        self._queue.put({"runner": "__stop__"})
+        self._worker.join(timeout=5)
         self._started = False
 
-    def _heartbeat_due(self) -> bool:
-        with self.control_lock:
-            return time.monotonic() >= self.next_heartbeat_at
+    def submit_interrupt(
+        self,
+        *,
+        runner: str = "interrupt",
+        source: str = "external",
+        impulse: float = 0.0,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        self._queue.put(
+            {
+                "runner": runner,
+                "source": source,
+                "impulse": float(impulse or 0.0),
+                "payload": dict(payload or {}),
+                "time": now_iso(),
+            }
+        )
 
-    def _schedule_next_heartbeat(self, state: dict[str, Any] | None = None) -> None:
-        interval = HEARTBEAT_IDLE_INTERVAL_SECONDS
-        if state is not None:
-            reasons = set(state.get("reasons") or [])
-            if "临时对话整理" in reasons:
-                interval = HEARTBEAT_DIGEST_DUE_INTERVAL_SECONDS
-            elif int(state.get("temp_round_count") or 0) > 0:
-                interval = HEARTBEAT_TEMP_PENDING_INTERVAL_SECONDS
-
-        with self.control_lock:
-            self.next_heartbeat_at = time.monotonic() + interval
-
-    def _heartbeat_loop(self) -> None:
-        while not self.stop_event.is_set():
-            if self.stop_event.wait(HEARTBEAT_LOOP_POLL_SECONDS):
+    def _worker_loop(self) -> None:
+        while not self._stop_event.is_set():
+            task = self._queue.get()
+            runner = str(task.get("runner", "")).strip()
+            if runner == "__stop__":
                 break
 
-            if not self._heartbeat_due():
-                continue
-
-            state: dict[str, Any] | None = None
+            error = ""
+            response = ""
             try:
-                response = ""
-                error = ""
-                timestamp = now_iso()
-                reasons: list[str] = []
-                try:
-                    state = prepare_heartbeat_state(commit_digest_prompted=False)
-                    timestamp = str(state.get("current_time") or timestamp)
-                    reasons = list(state.get("reasons") or [])
-                    prompt = build_heartbeat_prompt(state)
-                    response = run_heart(
-                        self.heart_agent,
-                        prompt,
-                        show_output=False,
-                    )
-                except Exception as exc:
-                    error = f"{type(exc).__name__}: {exc}"
-
-                if not error and state is not None and "临时对话整理" in reasons:
-                    note_temp_digest_prompted(timestamp)
-
-                self.heartbeat_logs.append(
-                    {
-                        "time": timestamp,
-                        "status": "error" if error else "ok",
-                        "reasons": reasons,
-                        "response": response,
-                        "error": error,
-                    }
+                response = run_heart(
+                    self.heart_agent,
+                    build_interrupt_prompt(task),
+                    show_output=False,
                 )
-            finally:
-                self._schedule_next_heartbeat(state)
+                update_state({"last_heartbeat_at": now_iso()})
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
 
+            self.heart_logs.append(
+                {
+                    "time": task.get("time") or now_iso(),
+                    "runner": runner,
+                    "source": str(task.get("source", "")).strip(),
+                    "status": "error" if error else "ok",
+                    "response": response,
+                    "error": error,
+                }
+            )

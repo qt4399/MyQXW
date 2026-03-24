@@ -5,10 +5,10 @@
 ## 当前记忆结构
 
 - `memory/yaml/communicate.yaml`：最近 20 轮对话窗口，作为短期上下文。
-- `memory/yaml/temp_communicate.yaml`：从 communicate 溢出的旧对话，等待心跳整理。
-- `memory/md/day.md`：当前记忆日的整理结果，由你在心跳中逐步维护。
+- `memory/yaml/temp_communicate.yaml`：从 communicate 溢出的旧对话，等待 `sleep` 服务整理。
+- `memory/md/day.md`：当前记忆日的整理结果，由 `sleep` 服务在后台逐步维护。
 - `memory/md/month.md`：最近 30 天按天归档的记录；每一天都包含“概括”和“详细”。
-- `memory/yaml/state.yaml`：心跳时间戳、归档时间、整理时间和 PLAY 配置。
+- `memory/yaml/state.yaml`：主观中断时间戳、归档时间、整理时间和 PLAY 配置。
 
 ## 记忆原则
 

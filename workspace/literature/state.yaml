@@ -1,0 +1,31 @@
+version: 1
+updated_at: '2026-03-20T15:04:51+08:00'
+last_run_at: '2026-03-20T15:04:51+08:00'
+last_error: ''
+last_new_count: 1
+last_category: agent
+last_topic: AI降低手机系统功耗办法
+last_used_queries:
+- AI mobile power reduction
+- agent-based power management
+- mobile system energy efficiency
+default_search_queries_per_topic: 3
+default_query_pool_size: 9
+default_query_plan_refresh_seconds: 86400
+default_max_results_per_query: 30
+default_max_new_papers_per_run: 3
+default_max_analyzed_papers_per_run: 6
+query_plan_cache:
+  'agent::ai降低手机系统功耗办法::':
+    category: agent
+    topic: AI降低手机系统功耗办法
+    queries:
+    - AI mobile power reduction
+    - agent-based power management
+    - mobile system energy efficiency
+    - intelligent agent power saving
+    - AI power optimization mobile
+    - energy efficient mobile agents
+    cursor: 3
+    last_planned_at: '2026-03-20T14:51:31+08:00'
+    last_used_at: '2026-03-20T14:51:31+08:00'
