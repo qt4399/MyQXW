@@ -10,3 +10,4 @@ requests
 pdf2image
 playwright
 mss
+ddgs

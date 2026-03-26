@@ -25,6 +25,7 @@ from skill.tools.visual_tools import (
     _inspect_image_result,
     _inspect_images_result,
 )
+from skill.tools.web_search_tools import search_web_duckduckgo_result
 from skill.tools.qq_tools import _parse_qq_session_id
 import cv2
 
@@ -143,6 +144,29 @@ def inspect_images(image_input: str, prompt: str = DEFAULT_MULTI_IMAGE_PROMPT) -
 
 
 
+@tool("search_web_duckduckgo")
+def search_web_duckduckgo(query: str, search_type: str = "text", max_results: int = 10) -> str:
+    """使用 DuckDuckGo 联网搜索。search_type 支持 text 和 news；查普通网页用 text，查新闻/热点用 news。返回标题、摘要和链接。"""
+    print(f"[chat] DuckDuckGo 搜索: query={query}, search_type={search_type}, max_results={max_results}")
+    try:
+        return _json_result(
+            **search_web_duckduckgo_result(
+                query=query,
+                search_type=search_type,
+                max_results=max_results,
+            )
+        )
+    except Exception as exc:
+        return _json_result(
+            returncode=1,
+            stdout="",
+            stderr=f"{type(exc).__name__}: {exc}",
+            query=str(query or "").strip(),
+            total=0,
+            results=[],
+        )
+
+
 @tool("send_picture_qq")
 def send_picture_qq(image_input: str, session_id: str = "") -> str:
     """额外工具：把图片发送到 QQ 会话。image_input 支持 image_id、图片路径、URL、data URL 或 base64；未提供 session_id 时默认发送到当前会话。"""
@@ -216,5 +240,6 @@ CHAT_EXTRA_TOOLS = [
     capture_screenshot,
     inspect_image,
     inspect_images,
+    search_web_duckduckgo,
     send_picture_qq,
 ]
