@@ -1,13 +1,30 @@
-langgraph
-langchain-core
-langchain-openai
-openai
-PyYAML
-feedparser
-opencv-python
-websocket-client
-requests
-pdf2image
-playwright
-mss
-ddgs
+# Python 推荐版本：3.11 或 3.12
+# （代码使用 X | Y 联合类型语法、asyncio 现代特性，websockets 13+ 要求 Python ≥ 3.9，推荐 3.11 以获得性能提升）
+
+# LangGraph / LangChain 三包需版本对齐
+langgraph>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-openai>=0.3,<0.4
+
+# openai Responses API（client.responses.create）自 1.66.0 引入
+openai>=1.66.0
+
+PyYAML>=6.0
+feedparser>=6.0
+
+# cv2.imwrite / VideoCapture
+opencv-python>=4.8.0
+
+# websocket-client：napcat_ws_client 用 websocket.create_connection
+websocket-client>=1.7.0
+
+# websockets.asyncio.server 子模块自 13.0 引入
+websockets>=13.0
+
+requests>=2.31.0
+pdf2image>=1.17.0
+playwright>=1.40.0
+mss>=9.0.0
+
+# ddgs 是 duckduckgo-search 的新包名，7.x 起改名
+ddgs>=7.0

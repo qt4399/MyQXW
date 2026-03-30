@@ -9,6 +9,7 @@ venv/
 
 config.json
 logs/
+test_model/
 
 memory/yaml/
 memory/md/day.md

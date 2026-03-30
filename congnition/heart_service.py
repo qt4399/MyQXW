@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from init import build_heart, run_heart
-from memory.memory_store import ensure_memory_layout, now_iso, update_state
+from memory.memory_store import DEFAULT_SESSION_ID, append_dialogue_round, ensure_memory_layout, now_iso, update_state
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
@@ -159,6 +159,9 @@ class HeartService:
             }
         )
 
+    def set_ws_server(self, ws_server) -> None:
+        self._ws_server = ws_server
+
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
             task = self._queue.get()
@@ -168,13 +171,29 @@ class HeartService:
 
             error = ""
             response = ""
+            prompt = build_interrupt_prompt(task)
             try:
                 response = run_heart(
                     self.heart_agent,
-                    build_interrupt_prompt(task),
+                    prompt,
                     show_output=False,
                 )
                 update_state({"last_heartbeat_at": now_iso()})
+
+                # 写入对话历史（heart 回应可见于下次上下文）
+                clean_response = response.strip()
+                is_heart_ok = clean_response.upper().startswith("HEART_OK")
+                if clean_response and not is_heart_ok:
+                    append_dialogue_round(
+                        f"[heart] {str(task.get('source', 'impulse')).strip()}",
+                        clean_response,
+                        session_id=DEFAULT_SESSION_ID,
+                    )
+                    # 推送到 WebSocket 前端
+                    ws = getattr(self, "_ws_server", None)
+                    if ws is not None:
+                        ws.send_proactive(clean_response)
+
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
 

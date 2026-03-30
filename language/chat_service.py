@@ -215,6 +215,86 @@ class ChatService:
         update_state({"last_assistant_message_at": now_iso()})
 
 
+    def stream_reply_events(
+        self,
+        user_prompt: str,
+        session_id: str = DEFAULT_SESSION_ID,
+        enable_picture: bool = False,
+        image_path: str = "",
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> Iterator[dict]:
+        """yield 结构化事件：tool_call / tool_result / text / done / interrupted"""
+        clean_prompt = normalize_user_prompt(user_prompt)
+        update_state({"last_user_message_at": now_iso()})
+        clear_assistant_image_tags(session_id=session_id)
+
+        # 1. logic 阶段：yield tool_call / tool_result / text 事件
+        logic_chunks: list[str] = []
+        with bind_session_id(session_id):
+            for event in self.logic_service.logic_stream_events(
+                clean_prompt,
+                session_id=session_id,
+                enable_picture=enable_picture,
+                image_path=image_path,
+                should_interrupt=should_interrupt,
+            ):
+                if should_interrupt and should_interrupt():
+                    yield {"type": "interrupted"}
+                    return
+                yield event
+                if event.get("type") == "text":
+                    logic_chunks.append(event["content"])
+
+        if should_interrupt and should_interrupt():
+            yield {"type": "interrupted"}
+            return
+
+        logic_reply = "".join(logic_chunks).strip()
+        final_reply = logic_reply
+
+        # 2. emotion 流式润色
+        if logic_reply:
+            yield {"type": "emotion_start"}
+            emotion_chunks: list[str] = []
+            try:
+                for chunk in self.emotion_service.polish_stream(
+                    clean_prompt, logic_reply, session_id=session_id
+                ):
+                    if should_interrupt and should_interrupt():
+                        yield {"type": "interrupted"}
+                        return
+                    yield {"type": "text", "content": chunk, "stage": "emotion"}
+                    emotion_chunks.append(chunk)
+                polished = "".join(emotion_chunks).strip()
+                if polished:
+                    final_reply = polished
+            except Exception as exc:
+                print(f"[chat_service] emotion 润色失败: {type(exc).__name__}: {exc}")
+
+        visible_reply = self._sanitize_visible_reply(final_reply)
+        memory_reply = self._build_memory_reply(final_reply, session_id=session_id)
+        append_dialogue_round(clean_prompt, memory_reply, session_id=session_id)
+        update_state({"last_assistant_message_at": now_iso()})
+
+        yield {"type": "done", "content": visible_reply}
+
+    def dispatch(
+        self,
+        session_id: str,
+        content: str,
+        image_path: str = "",
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> Iterator[dict]:
+        """统一消息入口：上层 transport 调此方法，传 session_id / content / image_path。"""
+        yield from self.stream_reply_events(
+            content,
+            session_id=session_id,
+            enable_picture=bool(image_path),
+            image_path=image_path,
+            should_interrupt=should_interrupt,
+        )
+
+
 def main() -> None:
     chat_service = ChatService()
     chat_service.start()

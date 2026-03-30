@@ -4,7 +4,7 @@ import time
 from typing import Callable
 from typing import Iterator
 
-from init import build_logic, run_logic, stream_logic
+from init import build_logic, run_logic, stream_logic, stream_logic_events
 from memory.memory_store import DEFAULT_SESSION_ID, ensure_memory_layout
 
 
@@ -45,6 +45,23 @@ class LogicService:
         should_interrupt: Callable[[], bool] | None = None,
     ) -> Iterator[str]:
         return stream_logic(
+            self.logic_agent,
+            user_prompt,
+            session_id=session_id,
+            should_interrupt=should_interrupt,
+            enable_picture=enable_picture,
+            image_path=image_path,
+        )
+
+    def logic_stream_events(
+        self,
+        user_prompt: str,
+        session_id: str = DEFAULT_SESSION_ID,
+        enable_picture: bool = False,
+        image_path: str = "",
+        should_interrupt: Callable[[], bool] | None = None,
+    ) -> Iterator[dict]:
+        return stream_logic_events(
             self.logic_agent,
             user_prompt,
             session_id=session_id,

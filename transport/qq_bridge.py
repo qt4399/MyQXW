@@ -170,16 +170,23 @@ class QQBridge:
 
             merged_prompt = self._merge_prompts(batch)
             should_interrupt = self._make_interrupt_checker(session_id, generation)
-            reply, interrupted = self.chat_service.chat_interruptible(
+            clean_reply = ""
+            interrupted = False
+            for event in self.chat_service.dispatch(
+                session_id,
                 merged_prompt,
-                session_id=session_id,
                 should_interrupt=should_interrupt,
-            )
+            ):
+                etype = event.get("type")
+                if etype == "interrupted":
+                    interrupted = True
+                    break
+                if etype == "done":
+                    clean_reply = str(event.get("content") or "").strip()
             if interrupted or should_interrupt():
                 self._prepend_batch(session_id, batch)
                 continue
 
-            clean_reply = str(reply or "").strip()
             if not clean_reply:
                 continue
             self._send_reply(batch[-1], clean_reply)

@@ -9,12 +9,15 @@ from scheduler.scheduler_service import SchedulerService
 from sleep.sleep_service import SleepService
 from transport.openai_api import OpenAICompatServer
 from transport.qq_bridge import QQBridge
+from transport.ws_server import WSServer
 
 if __name__ == "__main__":
     chat_service = ChatService()
     heart_service = HeartService()
     sleep_service = SleepService()
     learn_service = LearnService()
+    ws_server = WSServer(chat_service)
+    heart_service.set_ws_server(ws_server)
     scheduler_service = SchedulerService(heart_service=heart_service, sleep_service=sleep_service)
     openai_transport = OpenAICompatServer(chat_service)
     qq_bridge = QQBridge(chat_service)
@@ -23,12 +26,14 @@ if __name__ == "__main__":
     heart_service.start()
     sleep_service.start()
     learn_service.start()
+    ws_server.start()
     scheduler_service.start()
     openai_transport.start()
     qq_bridge.start()
 
     print("heart / sleep / learn / scheduler 在后台运行。")
     print("OpenAI-compatible API: http://127.0.0.1:8000/v1/chat/completions")
+    print("WebSocket API: ws://127.0.0.1:8001")
     try:
         while True:
             time.sleep(1)
@@ -37,6 +42,7 @@ if __name__ == "__main__":
     finally:
         qq_bridge.stop()
         openai_transport.stop()
+        ws_server.stop()
         scheduler_service.stop()
         learn_service.stop()
         sleep_service.stop()

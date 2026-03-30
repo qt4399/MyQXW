@@ -345,6 +345,36 @@ def stream_logic(
             yield text
 
 
+def stream_logic_events(
+    agent,
+    user_prompt: str,
+    session_id: str = DEFAULT_SESSION_ID,
+    should_interrupt: Callable[[], bool] | None = None,
+    enable_picture: bool = False,
+    image_path: str = "",
+) -> Iterator[dict]:
+    """yield 结构化事件: tool_call / tool_result / text"""
+    clean_prompt = normalize_user_prompt(user_prompt)
+    payload = build_input(clean_prompt, session_id=session_id, enable_picture=enable_picture, image_path=image_path)
+    for chunk, metadata in agent.stream(payload, stream_mode="messages"):
+        if should_interrupt and should_interrupt():
+            return
+        node = metadata.get("langgraph_node")
+        if node == "agent":
+            tool_calls = getattr(chunk, "tool_calls", None)
+            if tool_calls:
+                for tc in tool_calls:
+                    yield {"type": "tool_call", "name": tc.get("name", ""), "input": tc.get("args", {})}
+            for text in _iter_text_fragments(getattr(chunk, "content", "")):
+                yield {"type": "text", "content": text}
+        elif node == "tools":
+            name = getattr(chunk, "name", "")
+            content = getattr(chunk, "content", "")
+            if isinstance(content, list):
+                content = " ".join(str(c) for c in content)
+            yield {"type": "tool_result", "name": name, "output": str(content)}
+
+
 def run_logic(
     agent,
     user_prompt: str,
